@@ -96,14 +96,27 @@ IfoFacts readIfoFacts(const std::string& ifoPath) {
 
 bool Dictionary::open(const char* folderName) {
   basePath.clear();
-  hasSyn = false;
-  htmlDefinitions = false;
   std::string resolved;
   if (!DictionaryRegistry::resolveBasePath(folderName, resolved)) {
     LOG_ERR("DICT", "No dictionary found in folder '%s'", folderName ? folderName : "");
     return false;
   }
+  return openBasePath(std::move(resolved));
+}
 
+bool Dictionary::openFolder(const char* folderPath) {
+  basePath.clear();
+  std::string resolved;
+  if (!DictionaryRegistry::resolveFolderPath(folderPath, resolved)) {
+    LOG_ERR("DICT", "No dictionary found in '%s'", folderPath ? folderPath : "");
+    return false;
+  }
+  return openBasePath(std::move(resolved));
+}
+
+bool Dictionary::openBasePath(std::string resolved) {
+  hasSyn = false;
+  htmlDefinitions = false;
   if (!Storage.exists((resolved + ".idx").c_str())) {
     LOG_ERR("DICT", "%s.idx missing (compressed .idx.gz is not supported)", resolved.c_str());
     return false;

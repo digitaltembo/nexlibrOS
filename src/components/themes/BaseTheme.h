@@ -33,7 +33,7 @@ struct Rect {
 // Shared by the theme's drawing and HomeActivity's touch hit-testing.
 struct CardHomeLayout {
   static constexpr int MAX_CARDS = 4;
-  static constexpr int ICON_COUNT = 3;
+  static constexpr int ICON_COUNT = 4;
   Rect cards[MAX_CARDS];
   Rect covers[MAX_CARDS];
   bool showProgress[MAX_CARDS] = {};

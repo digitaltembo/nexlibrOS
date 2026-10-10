@@ -258,6 +258,19 @@ TEST_F(LibraryBuilderTest, DirectoryEntriesAreEnumeratedOnce) {
   EXPECT_EQ(fake::directoryEntriesByPath["/folder/c.txt"], 1u);
 }
 
+TEST_F(LibraryBuilderTest, AppsDirectoryAtRootIsNotScanned) {
+  fake::add("/apps/notepad/notes/1.md");
+  fake::add("/Apps/calendar/notes/2026-10.txt");
+  fake::add("/folder/apps/c.txt");
+
+  ASSERT_TRUE(buildLibraryIndex("/", stats, false));
+
+  EXPECT_EQ(stats.books, 3);
+  EXPECT_EQ(fake::directoryEntriesByPath["/apps/notepad"], 0u);
+  EXPECT_EQ(fake::directoryEntriesByPath["/Apps/calendar"], 0u);
+  EXPECT_EQ(fake::directoryEntriesByPath["/folder/apps/c.txt"], 1u);
+}
+
 TEST_F(LibraryBuilderTest, DirectoryResumeFailureRetainsPreviousIndex) {
   initial();
   const auto old = fake::files[INDEX]->bytes;

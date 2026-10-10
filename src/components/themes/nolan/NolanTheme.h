@@ -15,7 +15,7 @@ constexpr ThemeMetrics values = [] {
 
 // Home: the most recent book as a large card (cover, bold title, author,
 // progress ring), the next books as smaller cards, and an icon bar with
-// Settings, File Transfer and Library.
+// Settings, File Transfer, Apps and Library.
 class NolanTheme : public LyraTheme {
  public:
   bool hasCardHome() const override { return true; }

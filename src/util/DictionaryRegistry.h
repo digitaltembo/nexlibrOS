@@ -22,4 +22,9 @@ void discover(std::vector<DictionaryEntry>& out);
 // Returns false if the folder holds no usable dictionary in either root.
 bool resolveBasePath(const char* folderName, std::string& basePathOut);
 
+// Resolve an absolute dictionary folder path, in any location, to its
+// extensionless base path ("<folderPath>/<stem>"). Returns false if the folder
+// holds no usable dictionary.
+bool resolveFolderPath(const char* folderPath, std::string& basePathOut);
+
 }  // namespace DictionaryRegistry

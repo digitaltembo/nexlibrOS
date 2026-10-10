@@ -18,7 +18,7 @@
 class Activity;    // forward declaration
 class RenderLock;  // forward declaration
 
-enum class HomeMenuItem { NONE, FILE_BROWSER, LIBRARY, PLUGINS, FILE_TRANSFER, SETTINGS_MENU };
+enum class HomeMenuItem { NONE, FILE_BROWSER, LIBRARY, PLUGINS, FILE_TRANSFER, SETTINGS_MENU, APPS };
 
 /**
  * ActivityManager
@@ -91,6 +91,7 @@ class ActivityManager {
   void goToLibrary();
   void goToBrowser();
   void goToPlugins();
+  void goToApps();
   void goToReader(std::string path, bool allowFastInitialRefresh = false);
   void goToSleep(bool fromTimeout = false);
   void goToBoot();
@@ -104,6 +105,10 @@ class ActivityManager {
   // Remove the currentActivity, returning the last one on stack
   // Note: if popActivity() on last activity on the stack, we will goHome()
   void popActivity();
+
+  // Whether activity is the one on screen. Push/pop/replace swap the current
+  // activity under RenderLock, so the answer is stable while the caller holds it.
+  bool isCurrent(const Activity* activity) const { return currentActivity.get() == activity; }
 
   bool preventAutoSleep() const;
   bool requiresExclusiveStorageLoop() const;

@@ -20,6 +20,7 @@
 #include <new>
 
 #include "MappedInputManager.h"
+#include "activities/apps/LuaAppListActivity.h"
 #include "activities/reader/DictionaryDefinitionActivity.h"  // plain-text README viewer
 #include "components/CatalogScreens.h"
 #include "components/UITheme.h"
@@ -152,7 +153,7 @@ bool anyPluginInstalled() {
   for (const auto& e : PluginLocations::scanPlugins()) {
     if (e.hasPluginJs || e.hasDevice) return true;
   }
-  return false;
+  return anyLuaAppInstalled();
 }
 
 bool PluginCatalogActivity::loadManifest() {
@@ -287,6 +288,7 @@ void PluginCatalogActivity::onEnter() {
 void PluginCatalogActivity::enterPluginPicker() {
   Storage.remove(BROWSE_TMP_PATH);
   installedPlugins = discoverPlugins();
+  showApps = anyLuaAppInstalled();
   // Discovery just re-read the plugin folders; keep the event subscription
   // table in step so a plugin installed since boot starts receiving events
   // (and a removed one stops) without a restart.
@@ -494,7 +496,7 @@ bool PluginCatalogActivity::nextRowVisible() const {
 }
 
 int PluginCatalogActivity::rowCount() const {
-  if (state == State::PLUGIN_PICKER) return static_cast<int>(installedPlugins.size()) + (showOpds ? 1 : 0);
+  if (state == State::PLUGIN_PICKER) return static_cast<int>(installedPlugins.size()) + leadingRows();
   if (state == State::LIST_PICKER) return static_cast<int>(manifest.browseLists.size());
   if (state != State::BROWSING) return 0;
   return static_cast<int>(items.size()) + (prevRowVisible() ? 1 : 0) + (nextRowVisible() ? 1 : 0);
@@ -944,7 +946,18 @@ void PluginCatalogActivity::activateIndex(const int index) {
       activityManager.goToBrowser();  // replaces this screen with the OPDS browser
       return;
     }
-    const PluginRef& plugin = installedPlugins[index - (showOpds ? 1 : 0)];
+    if (showApps && index == (showOpds ? 1 : 0)) {
+      auto apps = makeUniqueNoThrow<LuaAppListActivity>(renderer, mappedInput);
+      if (!apps) {
+        LOG_ERR("PCAT", "OOM: app list");
+        return;
+      }
+      app.clearTapFlash();
+      pickerReturnRow = index;
+      startActivityForResult(std::move(apps), [](const ActivityResult&) {});
+      return;
+    }
+    const PluginRef& plugin = installedPlugins[index - leadingRows()];
     const auto action = PluginLocations::pickerAction(plugin.deviceKind, !plugin.readmePath.empty());
     if (action == PluginLocations::PickerAction::Readme) {
       // A plain paged text view, not the book reader: viewing instructions must
@@ -1165,6 +1178,7 @@ void PluginCatalogActivity::rebuildRowItems() {
   };
   if (state == State::PLUGIN_PICKER) {
     if (showOpds) addRow(tr(STR_OPDS_BROWSER), tr(STR_OPDS_SERVERS));
+    if (showApps) addRow(tr(STR_LUA_APPS), tr(STR_LUA_APPS_HINT), ">");
     for (const auto& plugin : installedPlugins) {
       //   None       -> web-only hint; chevron only with a readme
       //   Catalog    -> browsable, own description, chevron

@@ -47,6 +47,9 @@ void HomeActivity::activateSelection() {
     case HomeMenuItem::SETTINGS_MENU:
       onSettingsOpen();
       break;
+    case HomeMenuItem::APPS:
+      onAppsOpen();
+      break;
     default:
       break;
   }
@@ -695,3 +698,5 @@ void HomeActivity::onSettingsOpen() { activityManager.goToSettings(); }
 void HomeActivity::onFileTransferOpen() { activityManager.goToFileTransfer(); }
 
 void HomeActivity::onPluginsOpen() { activityManager.goToPlugins(); }
+
+void HomeActivity::onAppsOpen() { activityManager.goToApps(); }

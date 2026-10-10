@@ -110,4 +110,11 @@ bool resolveBasePath(const char* folderName, std::string& basePathOut) {
   return false;
 }
 
+bool resolveFolderPath(const char* folderPath, std::string& basePathOut) {
+  std::string stem;
+  if (!folderPath || !findStem(folderPath, stem)) return false;
+  basePathOut = std::string(folderPath) + "/" + stem;
+  return true;
+}
+
 }  // namespace DictionaryRegistry

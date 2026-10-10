@@ -114,6 +114,9 @@ class PluginCatalogActivity final : public CatalogActivity {
   Manifest manifest;
   std::vector<PluginRef> installedPlugins;
   bool showOpds = false;
+  bool showApps = false;  // Lua apps installed: adds the Apps row after OPDS
+  // Synthetic picker rows ahead of the installed plugins.
+  int leadingRows() const { return (showOpds ? 1 : 0) + (showApps ? 1 : 0); }
   bool rootMode = false;
   int pickerReturnRow = 0;  // picker row to reselect after leaving a catalog
   std::vector<Item> items;

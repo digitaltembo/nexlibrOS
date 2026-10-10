@@ -8,6 +8,7 @@
 #include <Logging.h>
 #include <Memory.h>
 #include <Utf8.h>
+#include <strings.h>  // strcasecmp
 
 #include <algorithm>
 #include <cstddef>
@@ -218,6 +219,14 @@ bool isBookName(const std::string& name) {
 // these (FileBrowserActivity isMacOSMetadataEntry); the shelf must agree, or a
 // card written on a Mac shows every book twice.
 bool isHiddenOrSidecar(const char* name) { return name[0] == '.'; }
+
+// Lua apps keep their notes and data as .txt/.md files under /apps; those are
+// app state, not books. FAT names are case-insensitive, so "/Apps" is the same folder.
+constexpr char APPS_DIR_NAME[] = "apps";
+
+bool isAppsDir(const std::string& parent, const char* name) {
+  return parent == "/" && strcasecmp(name, APPS_DIR_NAME) == 0;
+}
 
 std::string stemOf(const std::string& name) {
   const size_t dot = name.find_last_of('.');
@@ -546,6 +555,7 @@ void walk(WalkState& st, const std::string& path, const int depth) {
     const std::string name(st.nameBuf);
 
     if (isDir) {
+      if (isAppsDir(path, st.nameBuf)) continue;
       const size_t resumePosition = dir.position();
       dir.close();
       walk(st, joinLibraryPath(path, name), depth + 1);
