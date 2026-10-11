@@ -121,32 +121,43 @@ function wikipack:search(query, limit, scan_pages)
     local mid = (lo + hi + 1) // 2
     if self:page_first(mid) < qp then lo = mid else hi = mid - 1 end
   end
-  local hits, order = {}, {}
+  limit = limit or 20
+  -- Only the best `limit` hits are kept, ranked as they arrive: a short prefix
+  -- matches hundreds of titles and redirects, more than the app heap holds.
+  -- An evicted id can only come back ranked higher (as an exact match).
+  local best = {}
+  local function before(exact, id, hit)
+    if exact ~= hit.exact then return exact end
+    return id < hit.id
+  end
+  local function add(id, exact, via)
+    local at = #best + 1
+    for i, hit in ipairs(best) do
+      if hit.id == id then
+        if not exact or hit.exact then return end
+        table.remove(best, i)
+        at = #best + 1
+        break
+      end
+    end
+    while at > 1 and before(exact, id, best[at - 1]) do at = at - 1 end
+    if at > limit then return end
+    table.insert(best, at, { id = id, exact = exact, via = via })
+    best[limit + 1] = nil
+  end
   for p = lo, math.min(lo + (scan_pages or 3), self.hdr.pages) - 1 do
     local past = self:each_entry(p, function(key, id, redirect)
       if key:sub(1, #q) == q then
         local exact = key == q
-        local hit = hits[id]
-        if not hit then
-          hit = { id = id, exact = exact, via = redirect and key or nil }
-          hits[id] = hit
-          order[#order + 1] = hit
-        elseif exact and not hit.exact then
-          hit.exact, hit.via = true, redirect and key or nil
-        end
+        add(id, exact, redirect and key or nil)
       elseif key > q then
         return true
       end
     end)
     if past then break end
   end
-  table.sort(order, function(a, b)
-    if a.exact ~= b.exact then return a.exact end
-    return a.id < b.id
-  end)
   local out = {}
-  for i = 1, math.min(limit or 20, #order) do
-    local hit = order[i]
+  for i, hit in ipairs(best) do
     out[i] = { id = hit.id, title = self:title(hit.id), via = hit.via }
   end
   return out
