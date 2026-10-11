@@ -306,13 +306,13 @@ int fsList(lua_State* L) {
   char path[luapaths::MAX_PATH];
   LuaRuntime::checkPath(L, 1, path, sizeof(path));
   auto* buf = static_cast<char*>(lua_newuserdatauv(L, LIST_BUFFER_BYTES, 0));
-  size_t used = 0;
   int count = 0;
   bool opened = false;
   {
     HalFile dir = Storage.open(path);
     opened = dir && dir.isDirectory();
     if (opened) {
+      size_t used = 0;
       for (HalFile entry = dir.openNextFile(); entry && count < LIST_MAX_ENTRIES; entry = dir.openNextFile()) {
         // Room for the name, a '/' marker, and the separator.
         const size_t room = LIST_BUFFER_BYTES - used;
@@ -444,17 +444,17 @@ void LuaRuntime::checkPath(lua_State* L, const int idx, char* out, const size_t 
   if (len == 0 || memchr(p, '\0', len) != nullptr) luaL_argerror(L, idx, "invalid path");
   if (hasDotSegment(p, len)) luaL_argerror(L, idx, "'.' and '..' are not allowed");
   const LuaRuntime* self = from(L);
-  const char* appDir = self->appDir();
+  const char* baseDir = self->appDir();
   int written;
   if (p[0] == '/') {
     written = snprintf(out, outLen, "%s", p);
   } else {
-    written = snprintf(out, outLen, "%s/%s", appDir, p);
+    written = snprintf(out, outLen, "%s/%s", baseDir, p);
   }
   if (written < 0 || static_cast<size_t>(written) >= outLen) luaL_argerror(L, idx, "path too long");
   if (!canonicalize(out)) luaL_argerror(L, idx, "invalid path segment");
-  if (isInside(out, appDir)) {
-    if (write && isEntryScript(out, appDir)) luaL_argerror(L, idx, "access denied (apps cannot modify index.lua)");
+  if (isInside(out, baseDir)) {
+    if (write && isEntryScript(out, baseDir)) luaL_argerror(L, idx, "access denied (apps cannot modify index.lua)");
   } else if (write) {
     if (isInside(out, luapaths::APPS_DIR) || !self->granted(out, true)) {
       luaL_argerror(L, idx, "access denied (no write permission)");
@@ -541,6 +541,8 @@ bool LuaRuntime::loadPermissions(char* err, const size_t errLen) {
   return true;
 }
 
+// lua_getextraspace is a Lua macro that expands to C-style casts.
+// cppcheck-suppress dangerousTypeCast
 LuaRuntime* LuaRuntime::from(lua_State* L) { return *static_cast<LuaRuntime**>(lua_getextraspace(L)); }
 
 void* LuaRuntime::alloc(void* ud, void* ptr, const size_t osize, const size_t nsize) {
@@ -625,6 +627,7 @@ bool LuaRuntime::open(const char* appName, const std::atomic<bool>* stopFlag, vo
     snprintf(err, errLen, "not enough memory");
     return false;
   }
+  // cppcheck-suppress cstyleCast
   *static_cast<LuaRuntime**>(lua_getextraspace(L)) = this;
   lua_atpanic(L, luaPanic);
   lua_sethook(L, &LuaRuntime::hook, LUA_MASKCOUNT, HOOK_INSTRUCTIONS);

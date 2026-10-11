@@ -46,7 +46,7 @@ bool onScreen(const GfxRenderer& renderer, const int x, const int y, const int w
          y + height <= renderer.getScreenHeight();
 }
 
-const char* drawPxc(GfxRenderer& renderer, const char* path, const int x, const int y) {
+const char* drawPxc(const GfxRenderer& renderer, const char* path, const int x, const int y) {
   HalFile file;
   if (!Storage.openFileForRead("LUA", path, file)) return "cannot open";
   int width = 0;
@@ -85,7 +85,7 @@ const char* drawPxc(GfxRenderer& renderer, const char* path, const int x, const 
   return nullptr;
 }
 
-const char* drawBmp(GfxRenderer& renderer, const char* path, const int x, const int y, const int width,
+const char* drawBmp(const GfxRenderer& renderer, const char* path, const int x, const int y, const int width,
                     const int height) {
   HalFile file;
   if (!Storage.openFileForRead("LUA", path, file)) return "cannot open";
@@ -127,7 +127,7 @@ const char* size(const char* path, int& width, int& height) {
     }
     case Format::Decoded: {
       const std::string source(path);
-      ImageToFramebufferDecoder* decoder = ImageDecoderFactory::getDecoder(source);
+      const ImageToFramebufferDecoder* decoder = ImageDecoderFactory::getDecoder(source);
       ImageDimensions dims{};
       if (!decoder || !decoder->getDimensions(source, dims) || dims.width <= 0 || dims.height <= 0) {
         return "unreadable image";
