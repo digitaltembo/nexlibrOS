@@ -118,6 +118,8 @@ class HalGPIO {
 
   // Check if USB is connected
   bool isUsbConnected() const;
+  // The state sampled by the last update(), without another (I2C on X3) read.
+  bool isUsbConnectedCached() const { return lastUsbConnected; }
 
   // Whether a cold boot with no USB detected can be trusted to mean a held
   // power button (Xteink-style button-energized rail with reliable USB

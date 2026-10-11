@@ -111,6 +111,8 @@ class ActivityManager {
   bool isCurrent(const Activity* activity) const { return currentActivity.get() == activity; }
 
   bool preventAutoSleep() const;
+  bool keepAwake() const;
+  bool allowIdleLightSleep() const;
   bool requiresExclusiveStorageLoop() const;
   bool isReaderActivity() const;
   bool handleForcedRefresh();

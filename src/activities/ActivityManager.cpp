@@ -388,6 +388,10 @@ void ActivityManager::popActivity() {
 
 bool ActivityManager::preventAutoSleep() const { return currentActivity && currentActivity->preventAutoSleep(); }
 
+bool ActivityManager::keepAwake() const { return currentActivity && currentActivity->keepAwake(); }
+
+bool ActivityManager::allowIdleLightSleep() const { return currentActivity && currentActivity->allowIdleLightSleep(); }
+
 bool ActivityManager::requiresExclusiveStorageLoop() const {
   return currentActivity && currentActivity->requiresExclusiveStorageLoop();
 }

@@ -1,6 +1,7 @@
 doc: >
   Pixel cache for a decoded EPUB image, written by PixelCache (lib/Epub/Epub/converters/PixelCache.h)
-  next to the extracted image with its extension replaced by .pxc. Pixels are already scaled and
+  next to the extracted image with its extension replaced by .pxc. Lua apps write the same format with
+  gfx.cache (see docs/lua-apps.md). Pixels are already scaled and
   dithered to the rendered size. A cache is reused only when width/height are within 1px of the
   expected render size and the file holds at least 4 + bytes_per_row * height bytes.
 

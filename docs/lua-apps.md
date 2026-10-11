@@ -107,6 +107,9 @@ pass `false` to draw white.
 | `gfx.text_width(str)`, `gfx.line_height()` | Measurement; usable outside `draw()`. |
 | `gfx.wrap(str, max_width [, max_lines])` | Word-wraps to a table of lines. |
 | `gfx.image(path, x, y [, max_w, max_h])` | Draws a BMP in black and white; returns `true` on success. |
+| `gfx.photo(path, x, y [, w, h])` | Draws a photo in four grey levels; returns `true`, or `nil, err`. A JPEG or PNG is scaled to exactly `w` x `h` and decoded on every draw (seconds for a camera photo), a BMP is scaled down to fit within `w` x `h`, and a `.pxc` from `gfx.cache` is drawn at its own size. `w` and `h` default to the rest of the screen, and the photo must lie on screen. At most 12 per frame. See [Photos](#photos). |
+| `gfx.image_size(path)` | Pixel size `w, h` of a JPEG, PNG, BMP or `.pxc`, or `nil, err`. Reads only the header; usable outside `draw()`. |
+| `gfx.cache(src, dst, w, h)` | Decodes the JPEG or PNG `src`, scaled to `w` x `h` (at most the screen size) and dithered, into the `.pxc` file `dst`, which `gfx.photo` then draws without decoding. Returns `true`, or `nil, err`. Not allowed inside `draw()`. |
 | `gfx.hints(back, confirm, left, right)` | The theme's button-hint bar along the bottom edge; `nil` hides a label. Returns the bar's height. |
 
 ## `sys`
@@ -121,9 +124,29 @@ pass `false` to draw white.
 | `sys.heap()` | Bytes used by this app's Lua heap, and the cap. |
 | `sys.has_touch()` | Whether the board has a touchscreen. |
 | `sys.app_dir()` | Absolute path of the app's directory, e.g. `/apps/notepad`. |
+| `sys.keep_awake(on)` | While on, inactivity does not put the device to sleep. It still drops to a low CPU clock when idle. Off when the app starts. |
+| `sys.light_sleep(on)` | While on, and once the device has been idle for a few seconds with no event pending, the chip light-sleeps in 100ms slices between input polls. Front and side buttons are sampled after each slice, so a tap shorter than that can be missed; the power button wakes the chip at once. Ignored while USB is connected, WiFi is on, the frontlight is lit, and on touch boards. |
 
 `os.time`, `os.date`, `os.clock` and `os.difftime` are available (the clock is
 only correct once it has been synced). `print` writes to the serial log.
+
+## Photos
+
+`gfx.photo` draws in two passes: inside `draw()` every non-white pixel of a
+photo goes black, then, after `draw()` returns, the photos are drawn again
+into the panel's two grey planes and the panel shows four grey levels. Pass
+`"half"` to `sys.redraw` for frames with photos, since grey images ghost under
+fast refreshes. Don't draw over a photo: the grey passes repaint its area.
+
+Decoding a large JPEG takes a second or more, so decode each photo once with
+`gfx.cache` into a `.pxc` (2 bits per pixel, see
+[files/pxc.ksy](files/pxc.ksy)) in the app's directory and draw that. Keep
+the decode out of `draw()` so a frame showing progress can be drawn first
+(see `lua/apps/gallery`).
+
+A slideshow can call `sys.keep_awake(true)` so the device does not sleep
+between slides, and `sys.light_sleep(true)` so it draws as little power as it
+can while waiting. Turn both off when the show stops so normal sleep resumes.
 
 ## `fs`
 

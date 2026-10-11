@@ -3,6 +3,7 @@
 #include <Arduino.h>
 #include <Bitmap.h>
 #include <GfxRenderer.h>
+#include <HalPowerManager.h>
 #include <HalStorage.h>
 #include <I18n.h>
 #include <Logging.h>
@@ -17,6 +18,7 @@
 #include "activities/util/KeyboardEntryActivity.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
+#include "lua/LuaImage.h"
 
 namespace {
 constexpr const char* BUTTON_NAMES[] = {"back", "confirm", "left", "right", "up", "down"};
@@ -288,6 +290,88 @@ struct LuaAppBindings {
     lua_pushboolean(L, ok);
     return 1;
   }
+  // photo(path, x, y [, w, h]) -> true | nil, err: a JPEG, PNG, BMP or .pxc in
+  // four grey levels (see luaimage::draw for sizing). w and h default to the
+  // rest of the screen.
+  static int photo(lua_State* L) {
+    auto& app = drawing(L);
+    char path[luapaths::MAX_PATH];
+    LuaRuntime::checkPath(L, 1, path, sizeof(path));
+    const int x = checkInt(L, 2);
+    const int y = checkInt(L, 3);
+    const int w = static_cast<int>(luaL_optinteger(L, 4, app.renderer.getScreenWidth() - x));
+    const int h = static_cast<int>(luaL_optinteger(L, 5, app.renderer.getScreenHeight() - y));
+    if (!app.photos) {
+      app.photos = makeUniqueNoThrow<LuaAppActivity::Photo[]>(LuaAppActivity::MAX_PHOTOS);
+      if (!app.photos) luaL_error(L, "not enough memory");
+    }
+    if (app.photoCount >= LuaAppActivity::MAX_PHOTOS) {
+      luaL_error(L, "at most %d photos per frame", static_cast<int>(LuaAppActivity::MAX_PHOTOS));
+    }
+    const char* err = luaimage::draw(app.renderer, path, x, y, w, h);
+    if (err) {
+      lua_pushnil(L);
+      lua_pushstring(L, err);
+      return 2;
+    }
+    auto& entry = app.photos[app.photoCount++];
+    memcpy(entry.path, path, sizeof(entry.path));
+    entry.x = static_cast<int16_t>(x);
+    entry.y = static_cast<int16_t>(y);
+    entry.width = static_cast<int16_t>(w);
+    entry.height = static_cast<int16_t>(h);
+    lua_pushboolean(L, 1);
+    return 1;
+  }
+  // image_size(path) -> w, h | nil, err
+  static int imageSize(lua_State* L) {
+    char path[luapaths::MAX_PATH];
+    LuaRuntime::checkPath(L, 1, path, sizeof(path));
+    int w = 0;
+    int h = 0;
+    const char* err = luaimage::size(path, w, h);
+    if (err) {
+      lua_pushnil(L);
+      lua_pushstring(L, err);
+      return 2;
+    }
+    lua_pushinteger(L, w);
+    lua_pushinteger(L, h);
+    return 2;
+  }
+  // cache(src, dst, w, h) -> true | nil, err: decodes a JPEG or PNG to a w x h
+  // .pxc that gfx.photo draws without decoding. Not inside draw(): it borrows
+  // the framebuffer, and draw() already holds RenderLock.
+  static int cache(lua_State* L) {
+    auto& app = self(L);
+    if (app.inDraw) luaL_error(L, "gfx.cache is not allowed inside draw()");
+    char src[luapaths::MAX_PATH];
+    char dst[luapaths::MAX_PATH];
+    LuaRuntime::checkPath(L, 1, src, sizeof(src));
+    LuaRuntime::checkPath(L, 2, dst, sizeof(dst), true);
+    const int w = checkInt(L, 3);
+    const int h = checkInt(L, 4);
+    const char* err = "app stopped";
+    // Give up on the lock once stopping, as drawFrame() does: onExit() holds it
+    // while waiting for this task.
+    while (!app.stopRequested.load()) {
+      RenderLock lock(RenderLock::Mode::Try);
+      if (!lock.ownsLock()) {
+        vTaskDelay(pdMS_TO_TICKS(10));
+        continue;
+      }
+      HalPowerManager::Lock powerLock;
+      err = luaimage::writeCache(app.renderer, src, dst, w, h);
+      break;
+    }
+    if (err) {
+      lua_pushnil(L);
+      lua_pushstring(L, err);
+      return 2;
+    }
+    lua_pushboolean(L, 1);
+    return 1;
+  }
   // hints(back, confirm, left, right) -> bar height: theme button-hint bar
   // along the bottom edge; nil hides a hint.
   static int hints(lua_State* L) {
@@ -363,6 +447,17 @@ struct LuaAppBindings {
     lua_pushstring(L, LuaRuntime::from(L)->appDir());
     return 1;
   }
+  // keep_awake(on): while on, inactivity does not put the device to sleep.
+  static int keepAwake(lua_State* L) {
+    self(L).keepAwakeRequested.store(lua_toboolean(L, 1));
+    return 0;
+  }
+  // light_sleep(on): while on and no event is pending, the chip light-sleeps
+  // between input polls once the device has been idle for a few seconds.
+  static int lightSleep(lua_State* L) {
+    self(L).lightSleepRequested.store(lua_toboolean(L, 1));
+    return 0;
+  }
 
   static void registerModules(lua_State* L) {
     static constexpr luaL_Reg GFX[] = {{"width", width},
@@ -384,11 +479,15 @@ struct LuaAppBindings {
                                        {"line_height", lineHeight},
                                        {"wrap", wrap},
                                        {"image", image},
+                                       {"photo", photo},
+                                       {"image_size", imageSize},
+                                       {"cache", cache},
                                        {"hints", hints},
                                        {nullptr, nullptr}};
-    static constexpr luaL_Reg SYS[] = {{"redraw", redraw},      {"exit", sysExit},      {"millis", millisFn},
-                                       {"set_tick", setTick},   {"keyboard", keyboard}, {"heap", heap},
-                                       {"has_touch", hasTouch}, {"app_dir", appDir},    {nullptr, nullptr}};
+    static constexpr luaL_Reg SYS[] = {{"redraw", redraw},          {"exit", sysExit},      {"millis", millisFn},
+                                       {"set_tick", setTick},       {"keyboard", keyboard}, {"heap", heap},
+                                       {"has_touch", hasTouch},     {"app_dir", appDir},    {"keep_awake", keepAwake},
+                                       {"light_sleep", lightSleep}, {nullptr, nullptr}};
     luaL_newlib(L, GFX);
     lua_setglobal(L, "gfx");
     luaL_newlib(L, SYS);
@@ -449,7 +548,20 @@ void LuaAppActivity::onExit() {
   Activity::onExit();
 }
 
-bool LuaAppActivity::postEvent(const Event& event) { return queue && xQueueSend(queue, &event, 0) == pdTRUE; }
+bool LuaAppActivity::postEvent(const Event& event) {
+  if (!queue) return false;
+  pendingEvents.fetch_add(1);
+  if (xQueueSend(queue, &event, 0) == pdTRUE) return true;
+  pendingEvents.fetch_sub(1);
+  return false;
+}
+
+bool LuaAppActivity::allowIdleLightSleep() {
+  // Touch controllers are polled for their current state, so a tap shorter
+  // than a light-sleep slice would be missed.
+  return lightSleepRequested.load() && pendingEvents.load() == 0 && !keyboardRequested.load() &&
+         !mappedInput.hasTouch();
+}
 
 void LuaAppActivity::loop() {
   if (exitRequested.load()) {
@@ -528,6 +640,7 @@ void LuaAppActivity::taskMain() {
     Event event{};
     if (xQueueReceive(queue, &event, pdMS_TO_TICKS(100)) != pdTRUE) continue;
     handleEvent(event);
+    pendingEvents.fetch_sub(1);
   }
   runtime.close();
   xSemaphoreGive(taskDone);
@@ -559,6 +672,8 @@ void LuaAppActivity::fail() {
   LOG_ERR("LUA", "%s: %s", appName.c_str(), errorText);
   failed.store(true);
   tickIntervalMs.store(0);
+  keepAwakeRequested.store(false);
+  lightSleepRequested.store(false);
   redrawRequested = true;
   refreshMode = HalDisplay::HALF_REFRESH;
 }
@@ -641,7 +756,10 @@ void LuaAppActivity::drawFrame() {
     // manager re-renders this activity when it pops, which posts Redraw.
     if (!activityManager.isCurrent(this)) return;
 
+    // Full clock for the render even when the idle loop has downclocked.
+    HalPowerManager::Lock powerLock;
     renderer.clearScreen();
+    photoCount = 0;
     if (!failed.load()) {
       inDraw = true;
       const bool ok = runtime.call(&LuaAppActivity::protectedDraw, nullptr, errorText, sizeof(errorText));
@@ -652,11 +770,49 @@ void LuaAppActivity::drawFrame() {
         renderer.clearScreen();
       }
     }
-    if (failed.load()) drawError();
-    renderer.displayBuffer(refreshMode);
+    if (failed.load()) {
+      photoCount = 0;
+      drawError();
+    }
+    if (photoCount > 0) {
+      displayWithPhotos();
+    } else {
+      renderer.displayBuffer(refreshMode);
+    }
     refreshMode = HalDisplay::FAST_REFRESH;
     return;
   }
+}
+
+void LuaAppActivity::displayWithPhotos() {
+  // The photos drew every non-white pixel black; the planes then mark which of
+  // those are grey. The stored BW frame is restored afterwards so the next
+  // differential refresh starts from what the panel shows.
+  if (!renderer.storeBwBuffer()) {
+    LOG_ERR("LUA", "No memory to store the BW frame; showing photos in black and white");
+    renderer.displayBuffer(refreshMode);
+    return;
+  }
+  renderer.displayGrayscaleBase(refreshMode);
+  for (const auto plane : {GfxRenderer::GRAYSCALE_LSB, GfxRenderer::GRAYSCALE_MSB}) {
+    renderer.clearScreen(0x00);
+    renderer.setRenderMode(plane);
+    for (uint8_t i = 0; i < photoCount; i++) {
+      const Photo& photo = photos[i];
+      if (const char* err = luaimage::draw(renderer, photo.path, photo.x, photo.y, photo.width, photo.height)) {
+        LOG_ERR("LUA", "Grey pass of %s: %s", photo.path, err);
+      }
+    }
+    if (plane == GfxRenderer::GRAYSCALE_LSB) {
+      renderer.copyGrayscaleLsbBuffers();
+    } else {
+      renderer.copyGrayscaleMsbBuffers();
+    }
+  }
+  renderer.displayGrayBuffer();
+  renderer.setRenderMode(GfxRenderer::BW);
+  renderer.restoreBwBuffer();
+  photoCount = 0;
 }
 
 void LuaAppActivity::drawError() {

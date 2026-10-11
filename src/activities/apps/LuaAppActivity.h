@@ -6,6 +6,7 @@
 #include <freertos/task.h>
 
 #include <atomic>
+#include <memory>
 #include <string>
 
 #include "activities/Activity.h"
@@ -18,7 +19,8 @@
 // a long-running script must not stall input, sleep, or Home handling.
 // loop() turns input into events for that task; the task calls the app's
 // callbacks and, when a redraw is pending, renders the app's draw() into the
-// framebuffer and pushes it to the panel itself under RenderLock.
+// framebuffer and pushes it to the panel itself under RenderLock. Photos the
+// frame drew with gfx.photo are then redrawn into the two grayscale planes.
 class LuaAppActivity final : public Activity {
  public:
   LuaAppActivity(GfxRenderer& renderer, MappedInputManager& mappedInput, std::string scriptPath, std::string appName);
@@ -29,6 +31,8 @@ class LuaAppActivity final : public Activity {
   // A screen pushed on top of the app (keyboard, light panel) overwrote the
   // framebuffer; the manager re-renders on return, so redraw the app.
   void render(RenderLock&&) override;
+  bool keepAwake() override { return keepAwakeRequested.load(); }
+  bool allowIdleLightSleep() override;
 
  private:
   friend struct LuaAppBindings;
@@ -49,6 +53,16 @@ class LuaAppActivity final : public Activity {
   static constexpr uint32_t MIN_TICK_MS = 250;
   static constexpr unsigned long EXIT_HOLD_MS = 1000;
   static constexpr size_t ERROR_TEXT_BYTES = 256;
+  static constexpr size_t MAX_PHOTOS = 12;
+
+  // A gfx.photo call of the current frame, replayed for each grayscale plane.
+  struct Photo {
+    char path[luapaths::MAX_PATH];
+    int16_t x;
+    int16_t y;
+    int16_t width;
+    int16_t height;
+  };
 
   static void taskTrampoline(void* param);
   void taskMain();
@@ -58,6 +72,8 @@ class LuaAppActivity final : public Activity {
   // Waits for RenderLock (giving up once stopping: onExit runs with the lock
   // held and waits for this task), then renders draw() and refreshes.
   void drawFrame();
+  // Shows the BW frame, then overlays the grays of the frame's photos.
+  void displayWithPhotos();
   // Paints the error screen into the framebuffer; caller refreshes.
   void drawError();
   void fail();
@@ -80,7 +96,11 @@ class LuaAppActivity final : public Activity {
   std::atomic<bool> keyboardRequested{false};
   std::atomic<uint32_t> tickIntervalMs{0};
   std::atomic<bool> tickPending{false};
+  std::atomic<bool> keepAwakeRequested{false};
+  std::atomic<bool> lightSleepRequested{false};
   unsigned long lastTickMs = 0;
+  // Events posted but not yet handled; the task is idle at zero.
+  std::atomic<uint32_t> pendingEvents{0};
 
   // Task-only state.
   bool redrawRequested = false;
@@ -89,6 +109,9 @@ class LuaAppActivity final : public Activity {
   int fontId = 0;
   uint8_t fontStyle = 0;
   int keyboardCallbackRef = -2;  // LUA_NOREF
+  // Allocated by the first gfx.photo call, so apps without photos don't pay for it.
+  std::unique_ptr<Photo[]> photos;
+  uint8_t photoCount = 0;
   char errorText[ERROR_TEXT_BYTES] = {};
 
   // Keyboard request (task -> loop) and result (result handler -> task). The
