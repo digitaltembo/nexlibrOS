@@ -59,6 +59,20 @@ void drawProgressRing(const GfxRenderer& renderer, const int cx, const int cy, c
   }
 }
 
+// Checkmark centred in a circle of radius `inner`. drawLine's width extends
+// downward, so strokes start half a width higher to stay centred.
+void drawCheckmark(const GfxRenderer& renderer, const int cx, const int cy, const int inner, const int width) {
+  const int top = cy - width / 2;
+  const int leftX = cx - inner * 9 / 20;
+  const int leftY = top + inner / 20;
+  const int bottomX = cx - inner * 3 / 20;
+  const int bottomY = top + inner * 7 / 20;
+  const int rightX = cx + inner * 9 / 20;
+  const int rightY = top - inner * 6 / 20;
+  renderer.drawLine(leftX, leftY, bottomX, bottomY, width, true);
+  renderer.drawLine(bottomX, bottomY, rightX, rightY, width, true);
+}
+
 void drawBookCard(GfxRenderer& renderer, const CardHomeLayout& layout, const int index, const RecentBook& book,
                   const int progress, const bool selected) {
   const Rect& card = layout.cards[index];
@@ -98,11 +112,17 @@ void drawBookCard(GfxRenderer& renderer, const CardHomeLayout& layout, const int
     const int radius = ring / 2;
     const int cx = card.x + card.width - cardPadding(large) - radius;
     const int cy = card.y + card.height / 2;
-    drawProgressRing(renderer, cx, cy, radius, large ? 6 : 5, progress);
-    char label[8];
-    snprintf(label, sizeof(label), "%d%%", progress);
-    const int labelWidth = renderer.getTextWidth(SMALL_FONT_ID, label);
-    renderer.drawText(SMALL_FONT_ID, cx - labelWidth / 2, cy - renderer.getLineHeight(SMALL_FONT_ID) / 2, label, true);
+    const int thickness = large ? 6 : 5;
+    drawProgressRing(renderer, cx, cy, radius, thickness, progress);
+    if (progress >= 100) {
+      drawCheckmark(renderer, cx, cy, radius - thickness, large ? 4 : 3);
+    } else {
+      char label[8];
+      snprintf(label, sizeof(label), "%d%%", progress);
+      const int labelWidth = renderer.getTextWidth(SMALL_FONT_ID, label);
+      renderer.drawText(SMALL_FONT_ID, cx - labelWidth / 2, cy - renderer.getLineHeight(SMALL_FONT_ID) / 2, label,
+                        true);
+    }
   }
 }
 }  // namespace
