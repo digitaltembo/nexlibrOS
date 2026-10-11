@@ -1,6 +1,7 @@
 #include "LuaRuntime.h"
 
 #include <Arduino.h>
+#include <HalMemory.h>
 #include <HalStorage.h>
 #include <InflateStream.h>
 #include <Logging.h>
@@ -27,8 +28,15 @@ constexpr int LIST_MAX_ENTRIES = 256;
 // fs.inflate: compressed bytes read from the card per fill, and the most it returns.
 constexpr size_t INFLATE_INPUT_BYTES = 2048;
 constexpr size_t INFLATE_MAX_OUTPUT = 16 * 1024;
-// Decompressor state plus 32KB window, refused up front unless this much is contiguous.
+// Decompressor state (~8KB) and 32KB window are separate blocks: only the
+// window must be contiguous, but both must fit.
+constexpr size_t INFLATE_WINDOW_BYTES = 32 * 1024;
 constexpr size_t INFLATE_HEAP_BYTES = 44 * 1024;
+
+bool inflateHeapAvailable() {
+  const auto heap = HalMemory::getDefaultHeap();
+  return heap.largestBlockBytes >= INFLATE_WINDOW_BYTES && heap.freeBytes >= INFLATE_HEAP_BYTES;
+}
 
 // True when any '/'-separated segment of path is "." or "..".
 bool hasDotSegment(const char* path, const size_t len) {
@@ -173,7 +181,16 @@ int fsInflate(lua_State* L) {
   }
   // Lua allocations come first: an OOM raised here unwinds past no C++ objects.
   auto* out = static_cast<uint8_t*>(lua_newuserdatauv(L, len, 0));
-  if (ESP.getMaxAllocHeap() < INFLATE_HEAP_BYTES) return pushFailure(L, "not enough memory", path);
+  if (!inflateHeapAvailable()) {
+    // Dead strings from earlier reads fragment the heap; a full collection
+    // usually coalesces enough for the window.
+    lua_gc(L, LUA_GCCOLLECT);
+    if (!inflateHeapAvailable()) {
+      const auto heap = HalMemory::getDefaultHeap();
+      LOG_ERR("LUA", "fs.inflate OOM: heap %zu free/%zu max", heap.freeBytes, heap.largestBlockBytes);
+      return pushFailure(L, "not enough memory", path);
+    }
+  }
 
   const char* error = nullptr;
   size_t produced = 0;
