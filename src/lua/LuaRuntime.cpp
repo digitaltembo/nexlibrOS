@@ -5,7 +5,7 @@
 #include <InflateStream.h>
 #include <Logging.h>
 #include <Memory.h>
-#include <esp_system.h>
+#include <esp_heap_caps.h>
 
 #include <algorithm>
 #include <cstdio>
@@ -538,7 +538,10 @@ void* LuaRuntime::alloc(void* ud, void* ptr, const size_t osize, const size_t ns
   if (nsize > oldSize) {
     const size_t growth = nsize - oldSize;
     if (self->used + growth > HEAP_CAP) return nullptr;
-    if (esp_get_free_heap_size() < MIN_FREE_HEAP + growth) return nullptr;
+    // Internal RAM only: with PSRAM, malloc still places blocks under
+    // SPIRAM_MALLOC_ALWAYSINTERNAL (nearly all Lua objects) in internal RAM,
+    // and the default free size would count the PSRAM too.
+    if (heap_caps_get_free_size(MALLOC_CAP_INTERNAL) < MIN_FREE_HEAP + growth) return nullptr;
   }
   void* block = realloc(ptr, nsize);
   if (!block) return nullptr;

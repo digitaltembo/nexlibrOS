@@ -8,7 +8,7 @@
 #include <I18n.h>
 #include <Logging.h>
 #include <Memory.h>
-#include <esp_system.h>
+#include <esp_heap_caps.h>
 
 #include <cstring>
 #include <lua.hpp>
@@ -510,7 +510,8 @@ void LuaAppActivity::onEnter() {
   if (!queue || !taskDone ||
       xTaskCreate(&LuaAppActivity::taskTrampoline, "LuaApp", TASK_STACK_BYTES, this, 1, &task) != pdPASS) {
     task = nullptr;
-    LOG_ERR("LUA", "OOM: app task (free heap %u)", static_cast<unsigned>(esp_get_free_heap_size()));
+    LOG_ERR("LUA", "OOM: app task (free internal heap %u)",
+            static_cast<unsigned>(heap_caps_get_free_size(MALLOC_CAP_INTERNAL)));
     snprintf(errorText, sizeof(errorText), "not enough memory to start the app");
     failed.store(true);
     renderer.clearScreen();

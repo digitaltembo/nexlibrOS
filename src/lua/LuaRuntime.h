@@ -45,7 +45,7 @@ std::string_view headerValue(std::string_view line, std::string_view key);
 class LuaRuntime {
  public:
   // Lua heap ceiling per app; the allocator also refuses growth that would
-  // leave less than MIN_FREE_HEAP for the rest of the firmware. Lua objects
+  // leave less than MIN_FREE_HEAP of internal RAM for the rest of the firmware. Lua objects
   // are roughly 1.5x larger with 64-bit pointers (16-byte TValues), so the
   // native simulator gets a proportional cap to fit what fits on the device.
   static constexpr size_t HEAP_CAP = (sizeof(void*) > 4 ? 144 : 96) * 1024;
