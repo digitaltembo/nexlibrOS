@@ -10,6 +10,7 @@
 
 #include "RecentBooksStore.h"
 #include "components/UITheme.h"
+#include "components/icons/blocks.h"
 #include "components/icons/cover.h"
 #include "components/icons/library.h"
 #include "components/icons/settings2.h"
@@ -30,9 +31,9 @@ constexpr int SMALL_RING_DIAMETER = 48;
 // Narrowest title column worth keeping; below it a card drops its ring.
 constexpr int MIN_TEXT_WIDTH = 120;
 
-// Left to right; HomeActivity maps the same order to Settings, File Transfer
-// and Library.
-constexpr const uint8_t* ICONS[CardHomeLayout::ICON_COUNT] = {Settings2Icon, TransferIcon, LibraryIcon};
+// Left to right; HomeActivity maps the same order to Settings, File Transfer,
+// Apps and Library.
+constexpr const uint8_t* ICONS[CardHomeLayout::ICON_COUNT] = {Settings2Icon, TransferIcon, BlocksIcon, LibraryIcon};
 
 constexpr int cardPadding(const bool large) { return large ? LARGE_CARD_PADDING : SMALL_CARD_PADDING; }
 constexpr int ringDiameter(const bool large) { return large ? LARGE_RING_DIAMETER : SMALL_RING_DIAMETER; }
@@ -78,8 +79,8 @@ void drawBookCard(GfxRenderer& renderer, const CardHomeLayout& layout, const int
 
   const int titleFont = large ? UI_12_FONT_ID : UI_10_FONT_ID;
   const int authorFont = large ? UI_10_FONT_ID : SMALL_FONT_ID;
-  const auto titleLines = renderer.wrappedText(titleFont, book.title.c_str(), textWidth, large ? 3 : 2,
-                                               EpdFontFamily::BOLD);
+  const auto titleLines =
+      renderer.wrappedText(titleFont, book.title.c_str(), textWidth, large ? 3 : 2, EpdFontFamily::BOLD);
   const std::string author =
       book.author.empty() ? std::string() : renderer.truncatedText(authorFont, book.author.c_str(), textWidth);
 
@@ -124,8 +125,7 @@ CardHomeLayout NolanTheme::cardHomeLayout(const GfxRenderer& renderer) const {
   // (landscape) screens keep a readable minimum and show fewer small cards.
   const int available = layout.iconBar.y - CARD_GAP - top;
   // The large card's extra padding grows the card rather than shrinking its cover.
-  const int largeHeight =
-      std::clamp(available / 3, 150, 240) + 2 * (LARGE_CARD_PADDING - SMALL_CARD_PADDING);
+  const int largeHeight = std::clamp(available / 3, 150, 240) + 2 * (LARGE_CARD_PADDING - SMALL_CARD_PADDING);
   const int smallHeight = std::clamp(largeHeight * 55 / 100, 96, 136);
   const int smallCount =
       std::clamp((available - largeHeight) / (smallHeight + CARD_GAP), 0, CardHomeLayout::MAX_CARDS - 1);
@@ -146,9 +146,8 @@ CardHomeLayout NolanTheme::cardHomeLayout(const GfxRenderer& renderer) const {
   return layout;
 }
 
-void NolanTheme::drawCardHome(GfxRenderer& renderer, const CardHomeLayout& layout,
-                              const std::vector<RecentBook>& books, const int* progress,
-                              const int selectorIndex) const {
+void NolanTheme::drawCardHome(GfxRenderer& renderer, const CardHomeLayout& layout, const std::vector<RecentBook>& books,
+                              const int* progress, const int selectorIndex) const {
   const int bookCount = std::min(static_cast<int>(books.size()), layout.cardCount);
   if (bookCount == 0) {
     drawEmptyRecents(renderer, layout.cards[0]);

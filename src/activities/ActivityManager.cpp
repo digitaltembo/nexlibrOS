@@ -12,6 +12,7 @@
 
 #include "CrossPointSettings.h"
 #include "OpdsServerStore.h"
+#include "apps/LuaAppListActivity.h"
 #include "boot_sleep/BootActivity.h"
 #include "boot_sleep/SleepActivity.h"
 #include "browser/OpdsBookBrowserActivity.h"
@@ -301,6 +302,15 @@ void ActivityManager::goToPlugins() {
       std::make_unique<PluginCatalogActivity>(renderer, mappedInput, /*showOpds=*/false, /*rootMode=*/true));
 }
 
+void ActivityManager::goToApps() {
+  auto activity = makeUniqueNoThrow<LuaAppListActivity>(renderer, mappedInput);
+  if (!activity) {
+    LOG_ERR("ACT", "OOM: app list activity");
+    return;
+  }
+  replaceActivity(std::move(activity));
+}
+
 void ActivityManager::goToReader(std::string path, const bool allowFastInitialRefresh) {
   if (path.empty()) {
     goToFileBrowser("/");
@@ -343,6 +353,8 @@ void ActivityManager::goHome(HomeMenuItem initialMenuItem, bool cleanInitialRefr
       initialMenuItem = HomeMenuItem::LIBRARY;
     } else if (activityName == "PluginCatalog") {
       initialMenuItem = HomeMenuItem::PLUGINS;
+    } else if (activityName == "LuaAppList") {
+      initialMenuItem = HomeMenuItem::APPS;
     } else if (activityName == "CrossPointWebServer" || activityName == "OpdsBookBrowser") {
       initialMenuItem = HomeMenuItem::FILE_TRANSFER;
     } else if (activityName == "Settings" || activityName == "SettingsSection") {
@@ -375,6 +387,10 @@ void ActivityManager::popActivity() {
 }
 
 bool ActivityManager::preventAutoSleep() const { return currentActivity && currentActivity->preventAutoSleep(); }
+
+bool ActivityManager::keepAwake() const { return currentActivity && currentActivity->keepAwake(); }
+
+bool ActivityManager::allowIdleLightSleep() const { return currentActivity && currentActivity->allowIdleLightSleep(); }
 
 bool ActivityManager::requiresExclusiveStorageLoop() const {
   return currentActivity && currentActivity->requiresExclusiveStorageLoop();

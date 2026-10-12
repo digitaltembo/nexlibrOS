@@ -808,7 +808,7 @@ void loop() {
   }
 
   const unsigned long sleepTimeoutMs = SETTINGS.getSleepTimeoutMs();
-  if (sleepTimeoutMs > 0 && millis() - lastActivityTime >= sleepTimeoutMs) {
+  if (sleepTimeoutMs > 0 && millis() - lastActivityTime >= sleepTimeoutMs && !activityManager.keepAwake()) {
     LOG_DBG("SLP", "Auto-sleep triggered after %lu ms of inactivity", sleepTimeoutMs);
     enterDeepSleep(true);
     // This should never be hit as `enterDeepSleep` calls esp_deep_sleep_start
@@ -889,6 +889,7 @@ void loop() {
   }
 
   bool skipLoopDelay = false;
+  bool idleLightSleep = false;
   {
     RenderLock lock(RenderLock::Mode::Try);
     if (!lock.ownsLock()) {
@@ -897,6 +898,7 @@ void loop() {
       return;
     }
     skipLoopDelay = activityManager.skipLoopDelay();
+    idleLightSleep = activityManager.allowIdleLightSleep();
   }
 
   // Add delay at the end of the loop to prevent tight spinning
@@ -909,6 +911,10 @@ void loop() {
     if (millis() - lastActivityTime >= HalPowerManager::IDLE_POWER_SAVING_MS) {
       // If we've been inactive for a while, increase the delay to save power
       powerManager.setPowerSaving(true);  // Lower CPU frequency after extended inactivity
+      // An activity that opts in light-sleeps the chip between polls instead.
+      // A held contact skips the slice so its second debounce sample comes
+      // promptly; the next loop iteration polls input right after the wake.
+      if (idleLightSleep && !gpio.rawInputActive() && powerManager.lightSleep(gpio)) return;
       // Sleep in short slices and wake the poll as soon as a button contact closes.
       // InputManager commits a press only when two consecutive polls agree, so a
       // press shorter than one 50 ms sleep could land in a single sample and be lost.

@@ -44,7 +44,7 @@ class HomeActivity final : public Activity {
   std::array<std::unique_ptr<uint8_t[]>, CardHomeLayout::MAX_CARDS> cardCovers;
   std::array<size_t, CardHomeLayout::MAX_CARDS> cardCoverSizes{};
   static constexpr HomeMenuItem CARD_MENU[CardHomeLayout::ICON_COUNT] = {
-      HomeMenuItem::SETTINGS_MENU, HomeMenuItem::FILE_TRANSFER, HomeMenuItem::LIBRARY};
+      HomeMenuItem::SETTINGS_MENU, HomeMenuItem::FILE_TRANSFER, HomeMenuItem::APPS, HomeMenuItem::LIBRARY};
 
   const HomeMenuItem initialMenuItem;
   const bool cleanInitialRefresh;
@@ -89,6 +89,7 @@ class HomeActivity final : public Activity {
   void onSettingsOpen();
   void onFileTransferOpen();
   void onPluginsOpen();
+  void onAppsOpen();
 
   int getMenuItemCount() const;
   bool storeCoverBuffer();    // Store frame buffer for cover image

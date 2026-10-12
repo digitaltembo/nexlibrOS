@@ -118,6 +118,12 @@ def prepare_baseline(ref):
     """Detached worktree at `ref`, set up to build the same runner as the working tree."""
     sha = git("rev-parse", "--verify", f"{ref}^{{commit}}")
     tree = BENCH_DIR / "worktrees" / sha[:12]
+    # Keep only the worktree in use: each one carries its own ~200 MB build.
+    for stale in (BENCH_DIR / "worktrees").glob("*"):
+        if stale != tree:
+            print(f"removing stale baseline {stale.name}", file=sys.stderr)
+            git("worktree", "remove", "--force", str(stale))
+    git("worktree", "prune")
     if not tree.exists():
         tree.parent.mkdir(parents=True, exist_ok=True)
         git("worktree", "add", "--detach", str(tree), sha)
@@ -133,10 +139,10 @@ def prepare_baseline(ref):
             shutil.rmtree(sdk)
         sdk.symlink_to(REPO / "freeink-sdk")
 
-    # Relative symlink:// paths in the local ini are relative to the project,
-    # which is no longer next to the simulator checkout.
+    # Relative symlink:// and extra_scripts paths in the local ini are relative
+    # to the project, which is no longer next to the simulator checkout.
     ini = (REPO / LOCAL_INI).read_text()
-    ini = ini.replace("symlink://../", f"symlink://{REPO.parent}/")
+    ini = re.sub(r"(symlink://|pre:|post:)\.\./", rf"\g<1>{REPO.parent}/", ini)
     (tree / LOCAL_INI).write_text(ini)
 
     # The same runner on both sides, so only the library code differs.

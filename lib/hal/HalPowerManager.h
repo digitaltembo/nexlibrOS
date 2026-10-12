@@ -32,11 +32,21 @@ class HalPowerManager {
 #endif
   static constexpr unsigned long IDLE_POWER_SAVING_MS = 3000;  // ms
   static constexpr unsigned long BATTERY_POLL_MS = 1500;       // ms
+  // One lightSleep() slice; also the longest a front-button press can wait to
+  // be sampled, since the ADC-ladder buttons cannot wake the chip.
+  static constexpr unsigned long LIGHT_SLEEP_SLICE_MS = 100;  // ms
 
   void begin();
 
   // Control CPU frequency for power saving
   void setPowerSaving(bool enabled);
+
+  // Light-sleeps the chip for one LIGHT_SLEEP_SLICE_MS slice, waking early on
+  // a power-button press. Returns false without sleeping when unsafe: a
+  // performance Lock is held (a render is in flight), WiFi is on, USB is
+  // connected (light sleep drops the CDC link) or the frontlight is lit (light
+  // sleep stops its PWM).
+  bool lightSleep(const HalGPIO& gpio) const;
 
   // Setup wake up GPIO and enter deep sleep
   // Should be called inside main loop() to handle the currentLockMode

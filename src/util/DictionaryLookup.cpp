@@ -19,8 +19,7 @@ bool DictionaryLookup::prepare(const char* folderName) {
   return needsIndex;
 }
 
-bool DictionaryLookup::lookup(const char* word, std::string& definitionOut, std::string& headwordOut,
-                              StrId& errorOut) {
+bool DictionaryLookup::lookup(const char* word, std::string& definitionOut, std::string& headwordOut, StrId& errorOut) {
   if (!openOk) {
     errorOut = StrId::STR_DICT_ERROR;
     return false;

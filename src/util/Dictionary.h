@@ -46,6 +46,8 @@ class Dictionary {
   // Resolve the dictionary folder and validate its files. Rejects
   // dictionaries with 64-bit index offsets (idxoffsetbits=64 in .ifo).
   bool open(const char* folderName);
+  // As open(), for a dictionary folder given by absolute path.
+  bool openFolder(const char* folderPath);
   bool isOpen() const { return !basePath.empty(); }
 
   // True when the .qidx sidecar (or the .sidx sidecar of a present .syn) is
@@ -108,6 +110,9 @@ class Dictionary {
   // elsewhere: cleanWord(), stemVariants() and the matched headword.) False
   // (and logs) when the path would not fit, which open() has already ruled out.
   bool buildPath(char* buf, size_t bufSize, const char* suffix) const;
+
+  // Validate the files at resolved ("<folder>/<stem>") and adopt it as basePath.
+  bool openBasePath(std::string resolved);
 
   // The .idx / .qidx handles shared by every locate() call in one lookup. A
   // lookup probes up to ~5 stem variants; opening the two files per probe cost

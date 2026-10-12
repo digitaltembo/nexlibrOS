@@ -4,11 +4,13 @@
 #include <Logging.h>
 #include <PowerManager.h>
 #include <WiFi.h>
+#include <driver/gpio.h>
 #include <esp_sleep.h>
 #include <soc/soc_caps.h>
 
 #include <cassert>
 
+#include "HalFrontlight.h"
 #include "HalGPIO.h"
 
 #if FREEINK_DEVICE_PAPERMONO
@@ -131,6 +133,52 @@ void HalPowerManager::startDeepSleep(HalGPIO& gpio) const {
   // Waits for the power button to be physically released (so holding it doesn't
   // immediately wake the device again), then arms the wake source and sleeps.
   freeink::PowerManager::deepSleepUntilPowerButton();
+}
+
+bool HalPowerManager::lightSleep(const HalGPIO& gpio) const {
+  // Read without the mutex, as in setPowerSaving(): a Lock taken just after
+  // this check only freezes its task for one slice.
+  if (currentLockMode != None) return false;
+  if (WiFi.getMode() != WIFI_MODE_NULL || gpio.isUsbConnectedCached() || (Frontlight.present() && Frontlight.isOn())) {
+    return false;
+  }
+
+  // Front and side buttons sit on ADC ladders whose pressed levels stay
+  // mid-rail, so they are polled after each timer wake. The power button is a
+  // true GPIO and also wakes the chip, so a short tap is never lost.
+  esp_sleep_enable_timer_wakeup(static_cast<uint64_t>(LIGHT_SLEEP_SLICE_MS) * 1000ULL);
+  const int8_t powerPin = BoardConfig::ACTIVE.input.power;
+  if (powerPin >= 0) {
+    gpio_wakeup_enable(static_cast<gpio_num_t>(powerPin),
+                       BoardConfig::ACTIVE.input.powerActiveHigh ? GPIO_INTR_HIGH_LEVEL : GPIO_INTR_LOW_LEVEL);
+    esp_sleep_enable_gpio_wakeup();
+  }
+
+  // The C3 flash-leakage workaround pulls the unused SPIWP pad low during light
+  // sleep, which is GPIO13: the X4 battery latch and the X3 SD rail. Hold it
+  // high; startDeepSleep() releases the hold before driving it.
+  if (gpio.isXteinkDevice()) {
+    gpio_set_level(XTEINK_C3_GPIO13, 1);
+    gpio_set_direction(XTEINK_C3_GPIO13, GPIO_MODE_OUTPUT);
+    gpio_hold_en(XTEINK_C3_GPIO13);
+  }
+
+  const esp_err_t err = esp_light_sleep_start();
+
+  // An armed timer would also wake a later deep sleep. gpio_wakeup_disable()
+  // leaves the pin's level interrupt type behind, which would livelock any GPIO
+  // ISR service installed later, so clear that too.
+  esp_sleep_disable_wakeup_source(ESP_SLEEP_WAKEUP_ALL);
+  if (powerPin >= 0) {
+    gpio_wakeup_disable(static_cast<gpio_num_t>(powerPin));
+    gpio_set_intr_type(static_cast<gpio_num_t>(powerPin), GPIO_INTR_DISABLE);
+  }
+
+  if (err != ESP_OK) {
+    LOG_DBG("PWR", "Light sleep rejected: %d", static_cast<int>(err));
+    return false;
+  }
+  return true;
 }
 
 uint16_t HalPowerManager::getBatteryPercentage() const {
