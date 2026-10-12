@@ -1,7 +1,9 @@
 -- title: Gallery
 -- description: Photo browser and low-power slideshow
+-- permissions: read:/sleep read:/.sleep
 --
 -- Put folders of JPEG, PNG or BMP images in /apps/gallery (folders may nest).
+-- The sleep image folders /sleep and /.sleep also show at the top level.
 --
 -- Browser: Left/Right move, Up/Down move a row, Confirm opens a folder or
 -- photo, Back goes up a folder. The Slideshow tile plays the folder.
@@ -41,9 +43,11 @@ local mode = "browser" -- "browser", "viewer" or "settings"
 
 -- Browser state.
 local cwd = store.ROOT
--- Tiles: the specials ("play", "settings"), then folders, then photos. Plain
--- name arrays keep a folder of hundreds of photos small on the Lua heap.
+-- Tiles: the specials ("play", "settings"), then linked folders outside the
+-- app (top level only), then folders, then photos. Plain name arrays keep a
+-- folder of hundreds of photos small on the Lua heap.
 local specials = {}
+local links = {}
 local dirs, images = {}, {}
 local selected = 1
 local shown_page = nil
@@ -88,7 +92,13 @@ end
 
 local function relative(path)
   if path == store.ROOT then return "Gallery" end
+  if path:sub(1, #store.ROOT + 1) ~= store.ROOT .. "/" then return path end
   return path:sub(#store.ROOT + 2)
+end
+
+local function parent(path)
+  if store.is_link(path) then return store.ROOT end
+  return path:match("^(.*)/[^/]+$") or store.ROOT
 end
 
 local function basename(path)
@@ -98,7 +108,7 @@ end
 -- Browser ----------------------------------------------------------------------
 
 local function entry_count()
-  return #specials + #dirs + #images
+  return #specials + #links + #dirs + #images
 end
 
 -- Returns the kind ("play", "settings", "dir" or "image"), label and path of
@@ -109,6 +119,8 @@ local function entry(i)
     return kind, kind == "play" and "Slideshow" or "Settings"
   end
   i = i - #specials
+  if i <= #links then return "dir", links[i], links[i] end
+  i = i - #links
   if i <= #dirs then return "dir", dirs[i], cwd .. "/" .. dirs[i] end
   local name = images[i - #dirs]
   return "image", name, cwd .. "/" .. name
@@ -171,6 +183,7 @@ local function open_dir(path, select_path)
   specials = {}
   if #images > 0 or (settings.subfolders and #dirs > 0) then specials[#specials + 1] = "play" end
   if path == store.ROOT then specials[#specials + 1] = "settings" end
+  links = path == store.ROOT and store.links() or {}
   selected = 1
   for i = 1, entry_count() do
     local _, _, p = entry(i)
@@ -197,6 +210,27 @@ local function draw_folder_icon(cx, cy, size, black)
   gfx.fill_round_rect(x, y + h // 6, w, h - h // 6, 4, black)
 end
 
+-- An eight-toothed gear with a hole, size pixels across.
+local function draw_gear_icon(cx, cy, size)
+  local teeth = 8
+  local r_out, r_in = size // 2, size * 3 // 8
+  local step = 2 * math.pi / teeth
+  local points = {}
+  local function add(angle, r)
+    points[#points + 1] = cx + math.floor(r * math.cos(angle) + 0.5)
+    points[#points + 1] = cy + math.floor(r * math.sin(angle) + 0.5)
+  end
+  for k = 0, teeth - 1 do
+    local a = k * step
+    add(a - step * 0.3, r_in)
+    add(a - step * 0.18, r_out)
+    add(a + step * 0.18, r_out)
+    add(a + step * 0.3, r_in)
+  end
+  gfx.fill_polygon(points)
+  gfx.fill_circle(cx, cy, size * 3 // 20, false)
+end
+
 local function draw_tile(i, x, y, w, h)
   local kind, name, path = entry(i)
   local bw, bh = thumb_box()
@@ -221,8 +255,7 @@ local function draw_tile(i, x, y, w, h)
     elseif kind == "play" then
       gfx.fill_polygon({ cx - size // 3, cy - size // 2, cx - size // 3, cy + size // 2, cx + size // 2, cy })
     else
-      gfx.circle(cx, cy, size // 2)
-      gfx.fill_circle(cx, cy, size // 5)
+      draw_gear_icon(cx, cy, size)
     end
   end
   gfx.font("small")
@@ -256,7 +289,7 @@ local function draw_browser()
   if status then gfx.text(W - MARGIN - gfx.text_width(status), 14, status) end
   gfx.line(MARGIN, HEADER_H - 4, W - MARGIN, HEADER_H - 4)
 
-  if #dirs + #images == 0 then
+  if #links + #dirs + #images == 0 then
     gfx.font("ui")
     local lines = gfx.wrap("No photos here. Copy folders of JPEG, PNG or BMP images to " .. store.ROOT
       .. " on the SD card.", W - 4 * MARGIN)
@@ -462,7 +495,7 @@ local function activate(i)
     local paths = settings.subfolders and store.collect(cwd, MAX_SLIDES) or images
     if #paths > 0 then open_viewer(cwd, paths, 1, true) end
   elseif kind == "image" then
-    open_viewer(cwd, images, i - #specials - #dirs, false)
+    open_viewer(cwd, images, i - #specials - #links - #dirs, false)
   end
 end
 
@@ -526,7 +559,7 @@ function on_button(button)
   if button == "back" then
     if cwd == store.ROOT then return false end
     local from = cwd
-    open_dir(cwd:match("^(.*)/[^/]+$") or store.ROOT, from)
+    open_dir(parent(cwd), from)
     sys.redraw()
   elseif button == "confirm" then
     activate(selected)

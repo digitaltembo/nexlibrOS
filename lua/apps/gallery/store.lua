@@ -13,6 +13,9 @@ local SETTINGS = DATA .. "/settings.txt"
 
 store.ROOT = ROOT
 
+-- Folders outside the app listed at its top level; index.lua grants reading them.
+local LINKS = { "/sleep", "/.sleep" }
+
 local IMAGE_EXT = { jpg = true, jpeg = true, png = true, bmp = true }
 -- Photos listed per folder; more would not fit the app's Lua heap.
 store.MAX_FOLDER_IMAGES = 500
@@ -38,6 +41,22 @@ local function sort_names(names)
   table.sort(names)
   for i, keyed in ipairs(names) do names[i] = keyed:sub(keyed:find("\0", 1, true) + 1) end
   return names
+end
+
+-- Linked folders that exist on the card.
+function store.links()
+  local out = {}
+  for _, path in ipairs(LINKS) do
+    if fs.exists(path) then out[#out + 1] = path end
+  end
+  return out
+end
+
+function store.is_link(path)
+  for _, link in ipairs(LINKS) do
+    if link == path then return true end
+  end
+  return false
 end
 
 -- Returns the names of the folders and images directly inside dir, each
