@@ -23,6 +23,7 @@
 
 #include "../../util/BookmarkFile.h"
 #include "BookmarkEntry.h"
+#include "BookmarkMarker.h"
 #include "CrossPointSettings.h"
 #include "CrossPointState.h"
 #include "DictionaryWordSelectActivity.h"
@@ -31,6 +32,7 @@
 #include "EpubReaderFootnoteSelectActivity.h"
 #include "EpubReaderPercentSelectionActivity.h"
 #include "EpubReaderUtils.h"
+#include "HighlightMarks.h"
 #include "KOReaderCredentialStore.h"
 #include "KOReaderSyncActivity.h"
 #include "MappedInputManager.h"
@@ -256,6 +258,7 @@ bool EpubReaderActivity::loadBook() {
 
   loadLinkStack();
   loadCachedBookmarks();
+  HighlightFile::load(epub->getPath(), cachedHighlights);
   return true;
 }
 
@@ -335,23 +338,42 @@ void EpubReaderActivity::openDictionaryWordSelect() {
     requestUpdate();
     return;
   }
-  auto activity = makeDictionaryWordSelect();
+  auto activity = makeDictionaryWordSelect(false);
   if (!activity) return;
-  startActivityForResult(std::move(activity), [this](const ActivityResult&) { requestUpdate(); });
+  startWordSelect(std::move(activity));
 }
 
-// Long-press on a word enters lookup mode with that word highlighted. Anywhere
-// else the contact is left alone, so a long tap there still turns chapters.
+void EpubReaderActivity::openHighlightSelect() {
+  auto activity = makeDictionaryWordSelect(true);
+  if (!activity) return;
+  startWordSelect(std::move(activity));
+}
+
+// Long-press on a word enters word selection with that word under the cursor,
+// offering Look Up (when a dictionary is set), Highlight and, on a link, Go to.
+// Anywhere else the contact is left alone, so a long tap there still turns chapters.
 bool EpubReaderActivity::openDictionaryAtPoint(const int x, const int y) {
-  if (SETTINGS.dictionaryName[0] == '\0') return false;
-  auto activity = makeDictionaryWordSelect();
+  auto activity = makeDictionaryWordSelect(false);
   if (!activity || !activity->selectWordAt(x, y)) return false;
   mappedInput.suppressScreenContact();
-  startActivityForResult(std::move(activity), [this](const ActivityResult&) { requestUpdate(); });
+  startWordSelect(std::move(activity));
   return true;
 }
 
-std::unique_ptr<DictionaryWordSelectActivity> EpubReaderActivity::makeDictionaryWordSelect() {
+void EpubReaderActivity::startWordSelect(std::unique_ptr<DictionaryWordSelectActivity> activity) {
+  pendingWordLinkHref.clear();
+  startActivityForResult(std::move(activity), [this](const ActivityResult&) {
+    if (pendingWordLinkHref.empty()) {
+      requestUpdate();
+      return;
+    }
+    const std::string href = std::move(pendingWordLinkHref);
+    pendingWordLinkHref.clear();
+    navigateToHref(href, true);  // same as tapping the link directly
+  });
+}
+
+std::unique_ptr<DictionaryWordSelectActivity> EpubReaderActivity::makeDictionaryWordSelect(const bool highlightMode) {
   if (!section) return nullptr;
   auto page = section->loadPage(section->currentPage);
   if (!page) return nullptr;
@@ -362,8 +384,11 @@ std::unique_ptr<DictionaryWordSelectActivity> EpubReaderActivity::makeDictionary
   orientedMarginTop += SETTINGS.screenMargin;
   orientedMarginLeft += SETTINGS.screenMargin;
 
-  return std::make_unique<DictionaryWordSelectActivity>(renderer, mappedInput, std::move(page), orientedMarginLeft,
-                                                        orientedMarginTop);
+  using Mode = DictionaryWordSelectActivity::Mode;
+  return std::make_unique<DictionaryWordSelectActivity>(
+      renderer, mappedInput, std::move(page), orientedMarginLeft, orientedMarginTop,
+      highlightMode ? Mode::Highlight : Mode::Lookup, SETTINGS.dictionaryName[0] != '\0', cachedHighlights,
+      epub->getPath(), static_cast<uint16_t>(currentSpineIndex), pendingWordLinkHref);
 }
 
 void EpubReaderActivity::openFootnoteSelect(const bool reopenMenuOnCancel) {
@@ -635,6 +660,17 @@ void EpubReaderActivity::loop() {
         return;
       default:
         break;
+    }
+  }
+
+  // A tap on the top-right corner toggles the page's bookmark, ahead of links and
+  // the page-turn zones. Returning skips the page turn the same tap would trigger.
+  if (!endOfBookMenuOpen && !atEndOfBook && section && mappedInput.hasTouch()) {
+    int touchX = 0;
+    int touchY = 0;
+    if (mappedInput.wasScreenTapped(touchX, touchY) && BookmarkMarker::hitTest(renderer, touchX, touchY)) {
+      addBookmark();
+      return;
     }
   }
 
@@ -934,6 +970,10 @@ void EpubReaderActivity::onReaderMenuConfirm(EpubReaderMenuActivity::MenuAction 
     }
     case EpubReaderMenuActivity::MenuAction::DICTIONARY: {
       openDictionaryWordSelect();
+      break;
+    }
+    case EpubReaderMenuActivity::MenuAction::HIGHLIGHT: {
+      openHighlightSelect();
       break;
     }
     case EpubReaderMenuActivity::MenuAction::DISPLAY_QR: {
@@ -1719,7 +1759,15 @@ void EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int or
   const bool combinedGrayscaleBase =
       tiledGrayscale && !pageHasImages && grayscale.base == HalDisplay::GrayscaleBase::Combined;
   const bool overlapRefresh = tiledGrayscale && grayscale.asyncBase && !pageHasImages;
+  // B/W dither drawn under the text, so it goes wherever the full B/W page
+  // (text + status bar) is drawn, always before the text.
+  auto renderHighlights = [&]() {
+    HighlightMarks::drawBackgrounds(renderer, *page, fontId, orientedMarginLeft, orientedMarginTop, cachedHighlights,
+                                    static_cast<uint16_t>(currentSpineIndex));
+    if (currentPageBookmarked) BookmarkMarker::draw(renderer);
+  };
   auto renderGrayscalePass = [&]() {
+    if (absoluteImageGrayscale) renderHighlights();
     if (absoluteImageGrayscale || needsTextGrayscale) {
       page->render(renderer, fontId, orientedMarginLeft, orientedMarginTop);
     } else {
@@ -1729,12 +1777,14 @@ void EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int or
   };
 
   if (pageHasImagesNeedingDecode) {
+    renderHighlights();
     page->renderWithImagePlaceholders(renderer, fontId, orientedMarginLeft, orientedMarginTop);
     renderStatusBar();
     renderer.displayBuffer(HalDisplay::FAST_REFRESH);
     renderer.clearScreen();
   }
 
+  renderHighlights();
   page->render(renderer, fontId, orientedMarginLeft, orientedMarginTop);
   renderStatusBar();
   const auto tBwRender = millis();
@@ -1953,7 +2003,8 @@ void EpubReaderActivity::renderStatusBar() const {
     title = epub ? epub->getTitle() : "";
   }
 
-  GUI.drawStatusBar(renderer, bookProgress, currentPage, pageCount, title, 0, textYOffset, true, currentPageBookmarked,
+  // The page corner marks bookmarks (BookmarkMarker), so the status bar shows none.
+  GUI.drawStatusBar(renderer, bookProgress, currentPage, pageCount, title, 0, textYOffset, true, false,
                     section ? section->isBuilding() : false);
 }
 

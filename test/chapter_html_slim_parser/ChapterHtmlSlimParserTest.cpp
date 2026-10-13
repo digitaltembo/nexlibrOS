@@ -74,6 +74,18 @@ TEST_F(ChapterHtmlSlimParserTest, RubySurvivesPartialParagraphExtraction) {
   EXPECT_EQ(lines, 2u);
 }
 
+TEST_F(ChapterHtmlSlimParserTest, LinesCarryWordVisibleOffsets) {
+  ParsedText text;
+  text.addWord("alpha", EpdFontFamily::REGULAR, false, false, 70000);
+  text.addWord("beta", EpdFontFamily::REGULAR, false, false, 70006);
+  text.addWord("gamma", EpdFontFamily::REGULAR, false, false, 70011);
+  std::vector<uint32_t> offsets;
+  text.layoutAndExtractLines(renderer, 0, 200, [&](std::unique_ptr<TextBlock> line, auto) {
+    for (uint16_t i = 0; i < line->wordCount(); ++i) offsets.push_back(line->wordVisibleOffset(i));
+  });
+  EXPECT_EQ(offsets, (std::vector<uint32_t>{70000, 70006, 70011}));
+}
+
 TEST_F(ChapterHtmlSlimParserTest, UnequalTableCellsAndRubySurvivePageBreaks) {
   parser.viewportWidth = 240;
   parser.viewportHeight = 32;

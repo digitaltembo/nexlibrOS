@@ -52,8 +52,10 @@ void EpubReaderMenuActivity::buildMenuItems(std::vector<MenuItem>& items, bool h
   if (Frontlight.present()) {
     items.push_back({MenuAction::FRONTLIGHT, StrId::STR_FRONTLIGHT});
   }
+  // Long-press on a word offers both, so the menu entries are redundant then.
   if (!ReaderUtils::longPressWordLookupEnabled()) {
     items.push_back({MenuAction::DICTIONARY, StrId::STR_LOOKUP});
+    items.push_back({MenuAction::HIGHLIGHT, StrId::STR_HIGHLIGHT});
   }
   items.push_back({MenuAction::ROTATE_SCREEN, StrId::STR_ORIENTATION});
   items.push_back({MenuAction::AUTO_PAGE_TURN, StrId::STR_AUTO_TURN_PAGES_PER_MIN});

@@ -17,6 +17,7 @@
 #include "ReaderActivity.h"
 #include "ReaderToolbarUi.h"
 #include "components/OptionPopup.h"
+#include "util/HighlightFile.h"
 
 class DictionaryWordSelectActivity;
 
@@ -52,6 +53,9 @@ class EpubReaderActivity final : public ReaderActivity {
   unsigned long lastRenderCompleteMs = 0;
   bool bookmarkRemoved = false;
   std::vector<BookmarkEntry> cachedBookmarks;
+  std::vector<HighlightEntry> cachedHighlights;
+  // Link the word selector's Go to chose; followed once it closes.
+  std::string pendingWordLinkHref;
   bool recentsEntryRemoved = false;
   unsigned long bookmarkMessageTime = 0UL;
   bool pendingReadFolderMove = false;
@@ -170,8 +174,10 @@ class EpubReaderActivity final : public ReaderActivity {
   void activateMoreRow(int row);
   void openFootnoteSelect(bool reopenMenuOnCancel);
   void openDictionaryWordSelect();
+  void openHighlightSelect();
   bool openDictionaryAtPoint(int x, int y);
-  std::unique_ptr<DictionaryWordSelectActivity> makeDictionaryWordSelect();
+  std::unique_ptr<DictionaryWordSelectActivity> makeDictionaryWordSelect(bool highlightMode);
+  void startWordSelect(std::unique_ptr<DictionaryWordSelectActivity> activity);
   bool launchKOReaderSync();
   unsigned long confirmLongPressThreshold() const;
   void toggleAutoPageTurn(uint8_t selectedPageTurnOption);

@@ -56,7 +56,8 @@ namespace {
 //      Justification no longer stretches between syllables.
 // v49 was used by pre-release builds with a different header layout.
 // v50: Paragraph indentation width in the header for cache validation.
-constexpr uint8_t SECTION_FILE_VERSION = 50;
+// v51: TextBlock stores each word's visible-text offset (offsetBase + per-word delta).
+constexpr uint8_t SECTION_FILE_VERSION = 51;
 // Written into the version field while a build is in progress; patched to
 // SECTION_FILE_VERSION only when the build is finalized. An abandoned /
 // crash-interrupted .bin therefore carries version 0, which loadSectionFile rejects

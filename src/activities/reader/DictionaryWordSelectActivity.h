@@ -5,25 +5,46 @@
 #include <I18n.h>
 
 #include <memory>
+#include <string>
 #include <vector>
 
 #include "activities/Activity.h"
 #include "util/DictionaryLookup.h"
+#include "util/HighlightFile.h"
 
 // Word selection over the current reader page: Left/Right step through words
-// in reading order, Up/Down jump rows, Confirm looks the word up and opens
-// DictionaryDefinitionActivity, Back returns to the reader. On touch devices a
-// tap on another word moves the highlight, a tap on the highlighted word or its
-// "Look Up" bubble looks it up, and a tap away from any word returns to the
-// reader.
+// in reading order, Up/Down jump rows, Back returns to the reader.
+//
+// Lookup mode: Confirm looks the word up and opens DictionaryDefinitionActivity.
+// Highlight mode: Confirm marks the start of a highlight (or removes the
+// highlight under the cursor), moving extends it, and Confirm again saves it.
+//
+// On touch devices a tap on another word moves the cursor and the bubble over
+// it offers Look Up and Highlight (or Remove Highlight). While a highlight is
+// being extended, taps on words move its end, the bubble's Done (or a tap on
+// the end word) saves it, and a tap away from any word returns to the reader.
 class DictionaryWordSelectActivity final : public Activity {
  public:
+  enum class Mode : uint8_t { Lookup, Highlight };
+
+  // `highlights` is the reader's per-book list; this activity edits it in
+  // place and persists it to `bookPath`'s highlight file. Choosing Go to on a
+  // linked word stores the link's href in `followHref` and finishes; the
+  // reader navigates there.
   explicit DictionaryWordSelectActivity(GfxRenderer& renderer, MappedInputManager& mappedInput,
-                                        std::unique_ptr<Page> page, int marginLeft, int marginTop)
+                                        std::unique_ptr<Page> page, int marginLeft, int marginTop, Mode mode,
+                                        bool lookupAvailable, std::vector<HighlightEntry>& highlights,
+                                        std::string bookPath, uint16_t spineIndex, std::string& followHref)
       : Activity("DictionaryWordSelect", renderer, mappedInput),
         page(std::move(page)),
         marginLeft(marginLeft),
-        marginTop(marginTop) {}
+        marginTop(marginTop),
+        mode(mode),
+        lookupAvailable(lookupAvailable),
+        highlights(highlights),
+        bookPath(std::move(bookPath)),
+        spineIndex(spineIndex),
+        followHref(followHref) {}
 
   // Pre-selects the word under a screen point (the reader's long-press) before
   // the activity starts. False when no word is there.
@@ -41,15 +62,19 @@ class DictionaryWordSelectActivity final : public Activity {
     int16_t y;
     int16_t width;
     uint16_t row;
+    uint32_t offset;  // visible-text offset within the spine
     const char* text;
     EpdFontFamily::Style style;
   };
 
   enum class Popup : uint8_t { None, Busy, NotFound, Error };
 
-  // Tappable "Look Up" callout above the highlighted word, or below it when
-  // the word sits too close to the top of the screen. pointerX is the tip of
-  // the arrow, over the word's center.
+  static constexpr int MAX_BUBBLE_LABELS = 3;
+
+  // Tappable callout above the cursor word (or selection), or below it when it
+  // sits too close to the top of the screen. pointerX is the tip of the arrow,
+  // over the word's center. Segment i starts at segmentX[i] and ends where the
+  // next one starts, the last at the bubble's right edge.
   struct Bubble {
     int x;
     int y;
@@ -57,6 +82,9 @@ class DictionaryWordSelectActivity final : public Activity {
     int height;
     int pointerX;
     bool below;
+    uint8_t labelCount;
+    StrId labels[MAX_BUBBLE_LABELS];
+    int segmentX[MAX_BUBBLE_LABELS];
   };
 
   // A framebuffer rectangle saved into `snapshot` at `offset`.
@@ -75,22 +103,41 @@ class DictionaryWordSelectActivity final : public Activity {
   void moveVertical(int direction);
   void performLookup();
   bool drawHighlightWithSnapshot();
+  void drawSelection(int lo, int hi) const;
   Bubble lookupBubble() const;
-  bool bubbleHit(int x, int y) const;
+  int bubbleHit(int x, int y) const;
   void drawBubble(const Bubble& bubble) const;
   void drawHints() const;
+
+  // Index into `highlights` of the saved highlight covering words[wordIdx], or -1.
+  int highlightAt(int wordIdx) const;
+  // The page link that words[wordIdx] belongs to, or nullptr.
+  const PageLink* linkAt(int wordIdx) const;
+  // The action Confirm (or a tap on the cursor word) performs right now.
+  StrId primaryAction() const;
+  void runAction(StrId action);
+  void saveRange();
+  void removeHighlight(int index);
 
   std::unique_ptr<Page> page;
   const int marginLeft;
   const int marginTop;
+  const Mode mode;
+  const bool lookupAvailable;
+  std::vector<HighlightEntry>& highlights;
+  const std::string bookPath;
+  const uint16_t spineIndex;
+  std::string& followHref;
   int fontId = 0;
   int lineHeight = 0;
 
   std::vector<WordBox> words;
   int selected = 0;
+  // First word of the highlight being extended to `selected`; -1 when none.
+  int anchor = -1;
   bool wordsReady = false;
   bool preselected = false;
-  // Touch boards show a tappable "Look Up" bubble over the highlight.
+  // Touch boards show a tappable bubble over the cursor.
   const bool showBubble = BoardConfig::hasTouch();
   uint16_t rowCount = 0;
   unsigned long lastHorizontalMoveTime = 0;
@@ -108,9 +155,9 @@ class DictionaryWordSelectActivity final : public Activity {
   // only the affected boxes instead of re-running the full two-pass page
   // render (which also reloads every SD-font glyph on the page). snapshotIdx
   // is the word whose under-pixels are saved; -1 means the framebuffer no
-  // longer holds a clean page (popup drawn, sub-activity shown) and the next
-  // render must be full. The bubble region is saved after the highlight is
-  // drawn, so it is restored first.
+  // longer holds a clean page (popup drawn, sub-activity shown, multi-word
+  // selection) and the next render must be full. The bubble region is saved
+  // after the highlight is drawn, so it is restored first.
   static constexpr size_t SNAPSHOT_CAPACITY = 4096;
   std::unique_ptr<uint8_t[]> snapshot;
   SavedRegion highlightRegion;

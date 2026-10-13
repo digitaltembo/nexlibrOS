@@ -8,9 +8,11 @@
 #include <cctype>
 #include <climits>
 #include <cstdlib>
+#include <cstring>
 
 #include "CrossPointSettings.h"
 #include "DictionaryDefinitionActivity.h"
+#include "HighlightMarks.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
 #include "util/DictionaryRegistry.h"
@@ -24,7 +26,7 @@ constexpr unsigned long WORD_REPEAT_INTERVAL_MS = 500;
 // Highlight box grows the word by this much on each side.
 constexpr int HIGHLIGHT_PAD = 2;
 
-// "Look Up" bubble geometry.
+// Action bubble geometry.
 constexpr int BUBBLE_FONT_ID = UI_10_FONT_ID;
 constexpr int BUBBLE_PAD_X = 12;
 constexpr int BUBBLE_PAD_Y = 6;
@@ -119,6 +121,7 @@ void DictionaryWordSelectActivity::extractWords() {
       box.style = block->wordStyle(i);
       box.width = 0;  // measured below, once the advance table is ready
       box.row = rowCount;
+      box.offset = block->wordVisibleOffset(i);
       box.text = text;
       words.push_back(box);
       rowHasWords = true;
@@ -227,6 +230,98 @@ void DictionaryWordSelectActivity::performLookup() {
   requestUpdate();
 }
 
+int DictionaryWordSelectActivity::highlightAt(const int wordIdx) const {
+  for (int i = 0; i < static_cast<int>(highlights.size()); i++) {
+    if (highlights[i].contains(spineIndex, words[wordIdx].offset)) return i;
+  }
+  return -1;
+}
+
+const PageLink* DictionaryWordSelectActivity::linkAt(const int wordIdx) const {
+  // Probe the word's center, without the finger slop the reader's direct link
+  // taps use, so a neighbor of a narrow note marker doesn't claim its link.
+  const WordBox& word = words[wordIdx];
+  const int pageX = word.x + word.width / 2 - marginLeft;
+  const int pageY = word.y + lineHeight / 2 - marginTop;
+  for (const auto& link : page->links) {
+    if (link.contains(pageX, pageY, 0, 0)) return &link;
+  }
+  return nullptr;
+}
+
+StrId DictionaryWordSelectActivity::primaryAction() const {
+  if (anchor >= 0) return StrId::STR_DONE;
+  if (mode == Mode::Lookup && lookupAvailable) return StrId::STR_LOOKUP;
+  return highlightAt(selected) >= 0 ? StrId::STR_REMOVE_HIGHLIGHT : StrId::STR_HIGHLIGHT;
+}
+
+void DictionaryWordSelectActivity::runAction(const StrId action) {
+  switch (action) {
+    case StrId::STR_LOOKUP:
+      performLookup();
+      break;
+    case StrId::STR_HIGHLIGHT:
+      anchor = selected;
+      requestUpdate();
+      break;
+    case StrId::STR_REMOVE_HIGHLIGHT:
+      removeHighlight(highlightAt(selected));
+      break;
+    case StrId::STR_DONE:
+      saveRange();
+      break;
+    case StrId::STR_GO_TO:
+      if (const PageLink* link = linkAt(selected)) {
+        followHref = link->href;
+        finish();
+      }
+      break;
+    default:
+      break;
+  }
+}
+
+void DictionaryWordSelectActivity::saveRange() {
+  const int lo = std::min(anchor, selected);
+  const int hi = std::max(anchor, selected);
+
+  HighlightEntry entry;
+  entry.spineIndex = spineIndex;
+  entry.start = words[lo].offset;
+  entry.end = words[hi].offset;
+  for (const auto* p = reinterpret_cast<const uint8_t*>(words[hi].text); *p != 0; p++) {
+    if ((*p & 0xC0) != 0x80) entry.end++;  // one per UTF-8 lead byte
+  }
+  for (int i = lo; i <= hi; i++) {
+    const size_t len = strlen(words[i].text);
+    if (entry.text.size() + len + 1 > HighlightEntry::MAX_TEXT_LENGTH) break;
+    if (i > lo) entry.text.push_back(' ');
+    entry.text.append(words[i].text, len);
+  }
+
+  // Absorb any saved highlight the new one overlaps or touches (the merged
+  // entry keeps the new selection's text).
+  for (auto it = highlights.begin(); it != highlights.end();) {
+    if (it->spineIndex == spineIndex && it->start <= entry.end && entry.start <= it->end) {
+      entry.start = std::min(entry.start, it->start);
+      entry.end = std::max(entry.end, it->end);
+      it = highlights.erase(it);
+    } else {
+      ++it;
+    }
+  }
+  highlights.push_back(std::move(entry));
+  HighlightFile::save(bookPath, highlights);
+  finish();
+}
+
+void DictionaryWordSelectActivity::removeHighlight(const int index) {
+  if (index < 0 || index >= static_cast<int>(highlights.size())) return;
+  highlights.erase(highlights.begin() + index);
+  HighlightFile::save(bookPath, highlights);
+  finish();
+}
+
 void DictionaryWordSelectActivity::loop() {
   if (popup == Popup::NotFound || popup == Popup::Error) {
     if (millis() - popupTime >= POPUP_DURATION_MS) {
@@ -237,19 +332,24 @@ void DictionaryWordSelectActivity::loop() {
   }
 
   if (mappedInput.wasReleased(MappedInputManager::Button::Back)) {
-    finish();
+    if (anchor >= 0) {
+      anchor = -1;  // abandon the highlight in progress, keep the cursor
+      requestUpdate();
+    } else {
+      finish();
+    }
     return;
   }
   if (mappedInput.wasReleased(MappedInputManager::Button::Confirm) && !words.empty()) {
-    performLookup();
+    runAction(primaryAction());
     return;
   }
 
   if (words.empty()) return;
 
-  // Touch: the first tap (or long-press) on a word highlights it, a tap on the
-  // highlight or its bubble looks it up, and a tap away from the text leaves
-  // lookup mode.
+  // Touch: the first tap (or long-press) on a word moves the cursor to it, a
+  // tap on the cursor word or a bubble segment runs that action, and a tap
+  // away from the text leaves.
   int tx = 0;
   int ty = 0;
   if (mappedInput.wasScreenLongPress(tx, ty)) {
@@ -262,15 +362,16 @@ void DictionaryWordSelectActivity::loop() {
   }
   if (mappedInput.wasScreenTapped(tx, ty)) {
     // The bubble overlaps the neighbouring line, so it takes the tap first.
-    if (bubbleHit(tx, ty)) {
-      performLookup();
+    const int segment = bubbleHit(tx, ty);
+    if (segment >= 0) {
+      runAction(lookupBubble().labels[segment]);
       return;
     }
     const int hit = wordAt(tx, ty);
     if (hit < 0) {
       finish();
     } else if (hit == selected) {
-      performLookup();
+      runAction(primaryAction());
     } else {
       selected = hit;
       requestUpdate();
@@ -301,11 +402,41 @@ void DictionaryWordSelectActivity::loop() {
   }
 }
 
+// Inverts words[lo..hi] as one bar per row, spanning the gaps between words.
+void DictionaryWordSelectActivity::drawSelection(const int lo, const int hi) const {
+  int rowStart = lo;
+  while (rowStart <= hi) {
+    int rowEnd = rowStart;
+    int left = words[rowStart].x;
+    int right = words[rowStart].x + words[rowStart].width;
+    while (rowEnd + 1 <= hi && words[rowEnd + 1].row == words[rowStart].row) {
+      rowEnd++;
+      left = std::min<int>(left, words[rowEnd].x);
+      right = std::max<int>(right, words[rowEnd].x + words[rowEnd].width);
+    }
+    renderer.fillRect(left - HIGHLIGHT_PAD, words[rowStart].y - HIGHLIGHT_PAD, right - left + 2 * HIGHLIGHT_PAD,
+                      lineHeight + 2 * HIGHLIGHT_PAD, true);
+    for (int i = rowStart; i <= rowEnd; i++) {
+      renderer.drawText(fontId, words[i].x, words[i].y, words[i].text, false, words[i].style);
+    }
+    rowStart = rowEnd + 1;
+  }
+}
+
 // Saves the pixels under words[selected]'s highlight box (and bubble), then
 // draws them. Returns false when the pixels could not be saved (no buffer /
-// oversize box) — everything is drawn regardless, but the next cursor move
-// must do a full repaint.
+// oversize box, or a multi-word selection) — everything is drawn regardless,
+// but the next cursor move must do a full repaint.
 bool DictionaryWordSelectActivity::drawHighlightWithSnapshot() {
+  if (anchor >= 0) {
+    // Whole selection inverted; too large to snapshot.
+    drawSelection(std::min(anchor, selected), std::max(anchor, selected));
+    bubbleSaved = false;
+    if (showBubble) drawBubble(lookupBubble());
+    snapshotIdx = -1;
+    return false;
+  }
+
   const auto region = [](const int x, const int y, const int w, const int h, const size_t offset) {
     SavedRegion r;
     r.x = static_cast<int16_t>(x);
@@ -370,29 +501,59 @@ DictionaryWordSelectActivity::Bubble DictionaryWordSelectActivity::lookupBubble(
   renderer.getOrientedViewableTRBL(&top, &right, &bottom, &left);
 
   Bubble bubble;
-  bubble.width = renderer.getTextWidth(BUBBLE_FONT_ID, tr(STR_LOOKUP)) + 2 * BUBBLE_PAD_X;
+  bubble.labelCount = 0;
+  const StrId primary = primaryAction();
+  if (primary == StrId::STR_LOOKUP) {
+    // Lookup mode offers highlighting alongside.
+    bubble.labels[bubble.labelCount++] = StrId::STR_LOOKUP;
+    bubble.labels[bubble.labelCount++] =
+        highlightAt(selected) >= 0 ? StrId::STR_REMOVE_HIGHLIGHT : StrId::STR_HIGHLIGHT;
+  } else {
+    bubble.labels[bubble.labelCount++] = primary;
+  }
+  // A linked word can be followed from here, so links under the bookmark
+  // corner's tap target stay reachable.
+  if (anchor < 0 && linkAt(selected)) bubble.labels[bubble.labelCount++] = StrId::STR_GO_TO;
+
+  // Segment offsets are relative until bubble.x is known below.
+  bubble.width = 0;
+  for (int i = 0; i < bubble.labelCount; i++) {
+    bubble.segmentX[i] = bubble.width;
+    bubble.width += renderer.getTextWidth(BUBBLE_FONT_ID, I18N.get(bubble.labels[i])) + 2 * BUBBLE_PAD_X;
+  }
   bubble.height = renderer.getLineHeight(BUBBLE_FONT_ID) + 2 * BUBBLE_PAD_Y;
 
-  const int centerX = word.x + word.width / 2;
+  // A multi-word selection points at its first word from above, or at its
+  // last word from below, so the bubble never covers selected text.
+  const WordBox& first = anchor >= 0 ? words[std::min(anchor, selected)] : word;
+  const WordBox& last = anchor >= 0 ? words[std::max(anchor, selected)] : word;
+  const int aboveY = first.y - HIGHLIGHT_PAD - BUBBLE_GAP - POINTER_HEIGHT - bubble.height;
+  bubble.below = aboveY < top;
+  const WordBox& target = bubble.below ? last : first;
+  bubble.y = bubble.below ? target.y + lineHeight + HIGHLIGHT_PAD + BUBBLE_GAP + POINTER_HEIGHT : aboveY;
+
+  const int centerX = target.x + target.width / 2;
   const int maxX = renderer.getScreenWidth() - right - bubble.width;
   bubble.x = std::max(left, std::min(centerX - bubble.width / 2, maxX));
-
-  const int aboveY = word.y - HIGHLIGHT_PAD - BUBBLE_GAP - POINTER_HEIGHT - bubble.height;
-  bubble.below = aboveY < top;
-  bubble.y = bubble.below ? word.y + lineHeight + HIGHLIGHT_PAD + BUBBLE_GAP + POINTER_HEIGHT : aboveY;
 
   // Keep the arrow on the bubble's straight edge when the bubble is pushed
   // sideways by the screen edge.
   const int inset = BUBBLE_RADIUS + POINTER_HALF_WIDTH;
   bubble.pointerX = std::max(bubble.x + inset, std::min(centerX, bubble.x + bubble.width - inset));
+  for (int i = 0; i < bubble.labelCount; i++) bubble.segmentX[i] += bubble.x;
   return bubble;
 }
 
-bool DictionaryWordSelectActivity::bubbleHit(const int x, const int y) const {
-  if (!showBubble || words.empty()) return false;
+// Index of the bubble segment under the touch point, or -1.
+int DictionaryWordSelectActivity::bubbleHit(const int x, const int y) const {
+  if (!showBubble || words.empty()) return -1;
   const Bubble bubble = lookupBubble();
-  return x >= bubble.x - BUBBLE_HIT_SLOP && x < bubble.x + bubble.width + BUBBLE_HIT_SLOP &&
-         y >= bubble.y - BUBBLE_HIT_SLOP && y < bubble.y + bubble.height + BUBBLE_HIT_SLOP;
+  const bool inside = x >= bubble.x - BUBBLE_HIT_SLOP && x < bubble.x + bubble.width + BUBBLE_HIT_SLOP &&
+                      y >= bubble.y - BUBBLE_HIT_SLOP && y < bubble.y + bubble.height + BUBBLE_HIT_SLOP;
+  if (!inside) return -1;
+  int segment = 0;
+  while (segment + 1 < bubble.labelCount && x >= bubble.segmentX[segment + 1]) segment++;
+  return segment;
 }
 
 void DictionaryWordSelectActivity::drawBubble(const Bubble& bubble) const {
@@ -404,7 +565,13 @@ void DictionaryWordSelectActivity::drawBubble(const Bubble& bubble) const {
   const int ys[3] = {baseY, baseY, tipY};
   renderer.fillPolygon(xs, ys, 3, true);
 
-  renderer.drawText(BUBBLE_FONT_ID, bubble.x + BUBBLE_PAD_X, bubble.y + BUBBLE_PAD_Y, tr(STR_LOOKUP), false);
+  for (int i = 0; i < bubble.labelCount; i++) {
+    const int segX = bubble.segmentX[i];
+    if (i > 0) {
+      renderer.drawLine(segX, bubble.y + BUBBLE_PAD_Y, segX, bubble.y + bubble.height - BUBBLE_PAD_Y, false);
+    }
+    renderer.drawText(BUBBLE_FONT_ID, segX + BUBBLE_PAD_X, bubble.y + BUBBLE_PAD_Y, I18N.get(bubble.labels[i]), false);
+  }
 }
 
 // Front-button bar (Back/Confirm/Left/Right). Drawn last on every repaint
@@ -421,7 +588,14 @@ void DictionaryWordSelectActivity::drawHints() const {
     GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
     return;
   }
-  const auto labels = mappedInput.mapDirectionalLabels(tr(STR_BACK), tr(STR_LOOKUP), tr(STR_DIR_LEFT),
+  // Short labels on the hint bar: Select starts a highlight, Delete removes one.
+  StrId confirm = primaryAction();
+  if (confirm == StrId::STR_HIGHLIGHT) {
+    confirm = StrId::STR_SELECT;
+  } else if (confirm == StrId::STR_REMOVE_HIGHLIGHT) {
+    confirm = StrId::STR_DELETE;
+  }
+  const auto labels = mappedInput.mapDirectionalLabels(tr(STR_BACK), I18N.get(confirm), tr(STR_DIR_LEFT),
                                                        tr(STR_DIR_RIGHT), tr(STR_DIR_UP), tr(STR_DIR_DOWN));
   GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
 }
@@ -458,6 +632,7 @@ void DictionaryWordSelectActivity::render(RenderLock&&) {
   auto scope = fcm->createPrewarmScope();
   page->render(renderer, fontId, marginLeft, marginTop);
   scope.endScanAndPrewarm();
+  HighlightMarks::drawBackgrounds(renderer, *page, fontId, marginLeft, marginTop, highlights, spineIndex);
   page->render(renderer, fontId, marginLeft, marginTop);
 
   if (!words.empty()) {

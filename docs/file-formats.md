@@ -110,6 +110,12 @@ if (parsedSize != fileSize) {
 
 ## `section.bin`
 
+### Version 51
+
+`TextBlock` adds `offsetBase` after `textBytes` and a `wordOffsetDelta` array
+after `wordXPos`. Together they give each word's visible-codepoint offset within
+its spine, which anchors text highlights independently of pagination.
+
 ### Version 50
 
 The header adds `paragraphIndentSpaces` after `extraParagraphSpacing`. The value
@@ -227,7 +233,7 @@ import std.mem;
 import std.string;
 import std.core;
 
-#define EXPECTED_VERSION 50
+#define EXPECTED_VERSION 51
 #define MAX_STRING_LENGTH 65535
 #define FOOTNOTE_NUMBER_LEN 32
 #define FOOTNOTE_HREF_LEN 256
@@ -291,10 +297,12 @@ struct TextBlock {
     u16 wordCount;
     u8 hasFocus;
     u16 textBytes [[comment("Total size of text[], including one NUL per word")]];
+    u32 offsetBase [[comment("Smallest visible-text offset of any word on the line")]];
 
     if (wordCount > 0) {
         u16 textOff[wordCount] [[comment("Byte offset of word i's text within text[]")]];
         s16 wordXPos[wordCount];
+        u16 wordOffsetDelta[wordCount] [[comment("Word i's visible-text offset minus offsetBase")]];
         if (hasFocus != 0) {
             u16 wordFocusSuffixX[wordCount] [[comment("Suffix x offset from word start")]];
         }

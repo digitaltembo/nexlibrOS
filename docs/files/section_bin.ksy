@@ -10,12 +10,17 @@ seq:
   - id: version
     type: u1
     valid:
-      any-of: [45, 46, 236]
+      any-of: [51, 231]
+    doc: >
+      51 for a complete section; 231 (0xFE - (51 - 28)) for a partial build
+      suspended mid-parse, which ends with a watermark trailer.
   - id: font_id
     type: s4
   - id: line_compression
     type: f4
   - id: extra_paragraph_spacing
+    type: u1
+  - id: paragraph_indent_spaces
     type: u1
   - id: paragraph_alignment
     type: u1
@@ -32,6 +37,10 @@ seq:
     type: u1
     enum: image_rendering
   - id: focus_reading_enabled
+    type: u1
+  - id: character_spacing
+    type: s1
+  - id: word_spacing_percent
     type: u1
   - id: page_count
     type: u2
@@ -82,7 +91,20 @@ instances:
     repeat-expr: _root.page_count
     if: _root.visible_text_lut_offset != 0
 
+  partial_watermark:
+    pos: _root.visible_text_lut_offset + 4 * _root.page_count
+    type: partial_watermark
+    if: _root.version == 231
+    doc: Parse progress of a suspended build, right after the visible-text LUT
+
 types:
+  partial_watermark:
+    seq:
+      - id: bytes_consumed
+        type: u4
+      - id: total_bytes
+        type: u4
+
   anchor_map:
     seq:
       - id: count
@@ -208,6 +230,9 @@ types:
       - id: text_bytes
         type: u2
         doc: Total size of text[], including one NUL per word
+      - id: offset_base
+        type: u4
+        doc: Smallest visible-text offset (in codepoints within the spine item) of any word on the line
       - id: text_off
         type: u2
         repeat: expr
@@ -219,6 +244,12 @@ types:
         repeat: expr
         repeat-expr: word_count
         if: word_count > 0
+      - id: word_offset_delta
+        type: u2
+        repeat: expr
+        repeat-expr: word_count
+        if: word_count > 0
+        doc: "Word i's visible-text offset minus offset_base"
       - id: word_focus_suffix_x
         type: u2
         repeat: expr
@@ -240,12 +271,10 @@ types:
       - id: text
         type: strz
         encoding: UTF-8
-        include: false
-        consume: true
         repeat: expr
         repeat-expr: word_count
         if: word_count > 0
-        doc: Array of NUL-terminated UTF-8 words 
+        doc: Array of NUL-terminated UTF-8 words, text_bytes in total
       - id: ruby_text
         type: u4_prefixed_string
         repeat: expr
@@ -297,6 +326,8 @@ types:
         type: u1
       - id: direction_defined
         type: u1
+      - id: character_spacing
+        type: s1
 
   footnote_entry:
     seq:
