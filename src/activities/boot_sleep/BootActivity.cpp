@@ -1,21 +1,31 @@
 #include "BootActivity.h"
 
 #include <GfxRenderer.h>
-#include <I18n.h>
 
-#include "fontIds.h"
-#include "images/Logo120.h"
+#include "images/BootImage.h"
 
 void BootActivity::onEnter() {
   Activity::onEnter();
 
-  const auto pageWidth = renderer.getScreenWidth();
-  const auto pageHeight = renderer.getScreenHeight();
+  const int pageWidth = renderer.getScreenWidth();
+  const int pageHeight = renderer.getScreenHeight();
+  const int originX = (pageWidth - BOOT_IMAGE_WIDTH) / 2;
+  const int originY = (pageHeight - BOOT_IMAGE_HEIGHT) / 2;
+  constexpr int rowBytes = (BOOT_IMAGE_WIDTH + 7) / 8;
 
   renderer.clearScreen();
-  renderer.drawImage(Logo120, (pageWidth - 120) / 2, (pageHeight - 120) / 2, 120, 120);
-  renderer.drawCenteredText(UI_10_FONT_ID, pageHeight / 2 + 70, tr(STR_CROSSPOINT), true, EpdFontFamily::BOLD);
-  renderer.drawCenteredText(SMALL_FONT_ID, pageHeight / 2 + 95, tr(STR_BOOTING));
-  renderer.drawCenteredText(SMALL_FONT_ID, pageHeight - 30, CROSSPOINT_VERSION);
+  // Plot per pixel so orientation and panel size are handled by drawPixel;
+  // drawImage blits unrotated panel-space bytes.
+  for (int row = 0; row < BOOT_IMAGE_HEIGHT; row++) {
+    const int y = originY + row;
+    if (y < 0 || y >= pageHeight) continue;
+    for (int col = 0; col < BOOT_IMAGE_WIDTH; col++) {
+      const int x = originX + col;
+      if (x < 0 || x >= pageWidth) continue;
+      if (!(BootImage[row * rowBytes + col / 8] & (0x80 >> (col % 8)))) {
+        renderer.drawPixel(x, y, true);
+      }
+    }
+  }
   renderer.displayBuffer();
 }
