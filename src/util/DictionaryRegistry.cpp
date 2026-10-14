@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <cstring>
 
+#include "Dictionary.h"
 #include "StringUtils.h"
 
 namespace DictionaryRegistry {
@@ -57,6 +58,14 @@ bool findStem(const char* folderPath, std::string& stemOut) {
   return true;
 }
 
+// Length of the primary language subtag at tag ("en" in "en-GB", "fr" in
+// " fr_en"), after skipping leading spaces into *start.
+size_t primarySubtag(const char* tag, const char** start) {
+  while (*tag == ' ') tag++;
+  *start = tag;
+  return strcspn(tag, "-_, ");
+}
+
 }  // namespace
 
 void discover(std::vector<DictionaryEntry>& out) {
@@ -82,9 +91,10 @@ void discover(std::vector<DictionaryEntry>& out) {
 
       DictionaryEntry e;
       e.name = name;
+      e.lang = Dictionary::readLanguage(folderPath + "/" + stem);
       e.stem = std::move(stem);
       out.push_back(std::move(e));
-      LOG_DBG("DREG", "Found dictionary: %s", name);
+      LOG_DBG("DREG", "Found dictionary: %s (lang '%s')", name, out.back().lang.c_str());
     }
   }
 
@@ -115,6 +125,30 @@ bool resolveFolderPath(const char* folderPath, std::string& basePathOut) {
   if (!folderPath || !findStem(folderPath, stem)) return false;
   basePathOut = std::string(folderPath) + "/" + stem;
   return true;
+}
+
+bool servesLanguage(const DictionaryEntry& entry, const std::string& bookLanguage) {
+  const char* book = nullptr;
+  const size_t bookLen = primarySubtag(bookLanguage.c_str(), &book);
+  if (entry.lang.empty() || bookLen == 0) return true;
+
+  for (const char* tag = entry.lang.c_str(); tag != nullptr;) {
+    const char* dict = nullptr;
+    const size_t dictLen = primarySubtag(tag, &dict);
+    if (dictLen == bookLen && strncasecmp(dict, book, bookLen) == 0) return true;
+    tag = strchr(tag, ',');
+    if (tag) tag++;
+  }
+  return false;
+}
+
+void orderForBook(std::vector<DictionaryEntry>& dictionaries, const std::string& bookLanguage, const char* activeName) {
+  const auto active = std::find_if(dictionaries.begin(), dictionaries.end(),
+                                   [activeName](const DictionaryEntry& e) { return e.name == activeName; });
+  // rotate and stable_partition keep the other dictionaries in sorted order.
+  if (active != dictionaries.end()) std::rotate(dictionaries.begin(), active, active + 1);
+  std::stable_partition(dictionaries.begin(), dictionaries.end(),
+                        [&bookLanguage](const DictionaryEntry& e) { return servesLanguage(e, bookLanguage); });
 }
 
 }  // namespace DictionaryRegistry

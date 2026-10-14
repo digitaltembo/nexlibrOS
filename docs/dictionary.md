@@ -11,7 +11,7 @@ A dictionary folder must contain:
 - `.idx` — word index (required, **must be uncompressed** — a `.idx.gz` will not work; decompress it on your computer with `gzip -d` first)
 - `.dict` or `.dict.dz` — definition data (`.dict.dz` is supported as-is; entries are decompressed on the fly during lookup)
 - `.syn` — synonym index (optional; maps alternate spellings and irregular forms to their headword)
-- `.ifo` — metadata (optional)
+- `.ifo` — metadata (optional; may carry a `lang=` language tag, see below)
 
 Not supported: dictionaries with 64-bit index offsets (`idxoffsetbits=64` in the `.ifo` — rare, and rejected with an error).
 
@@ -25,6 +25,18 @@ Not supported: dictionaries with 64-bit index offsets (`idxoffsetbits=64` in the
 3. Select a dictionary from the list, or **None** to disable lookups.
 
 The Dictionary setting only appears when at least one usable dictionary folder exists. Folders containing more than one dictionary (multiple `.idx` stems) are skipped as ambiguous.
+
+### Language-Specific Dictionaries
+
+A dictionary can be marked as being for books in a given language by adding a `lang=` line to its `.ifo` file:
+
+```
+lang=fr
+```
+
+Every installed dictionary is still searched, but those whose tag matches the book's language (the EPUB's `dc:language`) are consulted and shown first. Matching compares the primary language subtag, ignoring case, so `lang=en` serves `en`, `en-US` and `en-GB` books, and a bilingual `lang=fr-en` dictionary serves French books. List several languages with commas (`lang=de,nl`).
+
+Dictionaries without a `lang=` tag (or without an `.ifo`) count as matching every book, and so does every dictionary for a book without language metadata. The dictionary selected in **Settings → Reader → Dictionary** is the default: it leads the matching dictionaries when it serves the book's language, and leads the others when it does not.
 
 ## Looking Up a Word
 
@@ -48,7 +60,7 @@ On the very first lookup with a dictionary (and again whenever the `.idx` or `.s
 1. **Direct match** — the word is found as-is (case-insensitive) in the dictionary index. Surrounding punctuation is ignored.
 2. **Synonyms** — on a miss, if the dictionary ships a `.syn` file, alternate spellings and irregular forms recorded there are resolved to their headword (e.g. `oxen` → `ox`, `colour` → `color`). This step is skipped if the `.sidx` sidecar could not be built (e.g. transient low memory during indexing); the dictionary otherwise stays usable, and the build is retried the next time it is opened.
 3. **Stemming** — still no match: common English word forms are retried automatically: possessives and plurals (`dogs` → `dog`, `stories` → `story`) and verb endings (`walked` → `walk`, `running` → `run`, `making` → `make`).
-4. **Other dictionaries** — if the selected dictionary still has no match, every other installed dictionary is tried in turn (steps 1–3 each), and the first one with the word is shown.
+4. **Other dictionaries** — if the default dictionary still has no match, the other dictionaries are tried in turn (steps 1–3 each), those for the book's language first, and the first one with the word is shown.
 5. **Not found** — no installed dictionary has the word: a short popup appears and you return to word selection.
 
 ## The Definition Screen
@@ -57,7 +69,7 @@ When a word is found, the definition screen shows the matched headword at the to
 
 HTML dictionaries that declare `sametypesequence=h` use the EPUB text-layout engine for semantic formatting such as headings, bold, italics, lists, and line breaks. Images and CSS styling are ignored. Definitions that are too large or cannot be laid out within the available memory fall back to plain text.
 
-When more than one dictionary is installed, a row of tabs under the headword lists them, with the dictionary the definition came from selected (your default, unless it lacked the word). Choosing another tab looks the same word up in that dictionary (showing *"Not found"* if it isn't there); your default dictionary setting is unchanged. Tabs are labelled with the dictionary folder names, so short folder names read best.
+When more than one dictionary is installed, a row of tabs sits under the headword. The definition is shown first from your default dictionary, or otherwise the first dictionary with the word, preferring the book's language, and its tab is selected. While you read it, the word is looked up in the remaining dictionaries in the background (a `...` placeholder marks the search in progress), and a tab appears for each dictionary that has the word. Dictionaries without it get no tab. The results are already loaded, so switching tabs displays them immediately (only unusually long definitions, beyond what fits in memory alongside the others, are re-read when their tab is chosen); your default dictionary setting is unchanged. Tabs are labelled with the dictionary folder names, so short folder names read best.
 
 - **Left/Right** or side **Up/Down** — previous / next page
 - **Confirm** — switch to the next dictionary tab

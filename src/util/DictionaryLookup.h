@@ -2,6 +2,7 @@
 
 #include <I18n.h>
 
+#include <atomic>
 #include <string>
 
 #include "util/Dictionary.h"
@@ -23,7 +24,14 @@ class DictionaryLookup {
 
   bool definitionsAreHtml() const { return dict.definitionsAreHtml(); }
 
+  // While *cancel is set, an index build in progress is abandoned (lookup()
+  // then fails with STR_DICT_ERROR). Null disables cancellation.
+  void setCancelFlag(const std::atomic<bool>* cancel) { cancelFlag = cancel; }
+
  private:
+  static bool indexBuildYield(void* self);
+
+  const std::atomic<bool>* cancelFlag = nullptr;
   Dictionary dict;
   std::string openName;
   bool opened = false;  // open() has run for openName (success or failure)

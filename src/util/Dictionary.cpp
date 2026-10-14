@@ -65,11 +65,33 @@ uint32_t readBe32(const uint8_t* p) {
 bool isWordByte(unsigned char c) { return c >= 0x80 || std::isalnum(c) != 0; }
 
 // Facts read from the .ifo at open time. Only the first 2KB is scanned — .ifo
-// headers are tiny and both keys always appear early when present.
+// headers are tiny and the keys always appear early when present.
 struct IfoFacts {
-  bool offsets64 = false;        // idxoffsetbits=64 (unsupported)
-  bool htmlDefinitions = false;  // sametypesequence=h (definitions are HTML)
+  bool offsets64 = false;                      // idxoffsetbits=64 (unsupported)
+  bool htmlDefinitions = false;                // sametypesequence=h (definitions are HTML)
+  char lang[Dictionary::MAX_LANG_BYTES] = "";  // lang=<tags> value, empty when absent
 };
+
+// Copies the value of the `key=` line (matched at a line start, so keys that
+// merely contain `key` are ignored) into out, trimmed of surrounding spaces.
+void readIfoValue(const char* buf, const char* key, char* out, const size_t outSize) {
+  const size_t keyLen = strlen(key);
+  for (const char* line = buf; line != nullptr;) {
+    const char* next = strchr(line, '\n');
+    if (strncmp(line, key, keyLen) != 0 || line[keyLen] != '=') {
+      line = next ? next + 1 : nullptr;
+      continue;
+    }
+    const char* value = line + keyLen + 1;
+    while (*value == ' ' || *value == '\t') value++;
+    size_t len = strcspn(value, "\r\n");
+    while (len > 0 && (value[len - 1] == ' ' || value[len - 1] == '\t')) len--;
+    len = std::min(len, outSize - 1);
+    memcpy(out, value, len);
+    out[len] = '\0';
+    return;
+  }
+}
 
 IfoFacts readIfoFacts(const std::string& ifoPath) {
   IfoFacts facts;
@@ -89,6 +111,7 @@ IfoFacts readIfoFacts(const std::string& ifoPath) {
     // entries keep the plain-text viewing path.
     facts.htmlDefinitions = eq[1] == 'h' && (eq[2] == '\0' || eq[2] == '\r' || eq[2] == '\n');
   }
+  readIfoValue(buf, "lang", facts.lang, sizeof(facts.lang));
   return facts;
 }
 
@@ -113,6 +136,8 @@ bool Dictionary::openFolder(const char* folderPath) {
   }
   return openBasePath(std::move(resolved));
 }
+
+std::string Dictionary::readLanguage(const std::string& basePath) { return readIfoFacts(basePath + ".ifo").lang; }
 
 bool Dictionary::openBasePath(std::string resolved) {
   hasSyn = false;
@@ -177,7 +202,7 @@ bool Dictionary::needsIndex() {
   return hasSyn && sidecarIsStale(basePath + ".syn", basePath + ".sidx", SIDX_MAGIC);
 }
 
-bool Dictionary::buildIndex(void (*yieldFn)(void*), void* ctx, IndexResult* outResult) {
+bool Dictionary::buildIndex(bool (*yieldFn)(void*), void* ctx, IndexResult* outResult) {
   const auto fail = [outResult](IndexResult r) {
     if (outResult) *outResult = r;
     return false;
@@ -207,7 +232,7 @@ bool Dictionary::buildIndex(void (*yieldFn)(void*), void* ctx, IndexResult* outR
 }
 
 bool Dictionary::buildSidecar(const std::string& sourcePath, const std::string& sidecarPath, uint32_t magic,
-                              uint32_t suffixBytes, void (*yieldFn)(void*), void* ctx, IndexResult* outResult) {
+                              uint32_t suffixBytes, bool (*yieldFn)(void*), void* ctx, IndexResult* outResult) {
   const auto fail = [outResult](IndexResult r) {
     if (outResult) *outResult = r;
     return false;
@@ -245,6 +270,7 @@ bool Dictionary::buildSidecar(const std::string& sourcePath, const std::string& 
   uint32_t pos = 0;
   uint32_t suffixLeft = 0;  // 0 while scanning a word, else suffix bytes remaining
   uint32_t sinceYield = 0;
+  bool cancelled = false;
   while (ok && pos < srcSize) {
     const int n = src.read(buf.get(), CHUNK_BYTES);
     if (n <= 0) {
@@ -268,7 +294,11 @@ bool Dictionary::buildSidecar(const std::string& sourcePath, const std::string& 
     sinceYield += n;
     if (yieldFn && sinceYield >= 64 * 1024) {
       sinceYield = 0;
-      yieldFn(ctx);
+      if (!yieldFn(ctx)) {
+        LOG_DBG("DICT", "Index build cancelled: %s", sidecarPath.c_str());
+        cancelled = true;
+        ok = false;
+      }
     }
   }
 
@@ -278,10 +308,10 @@ bool Dictionary::buildSidecar(const std::string& sourcePath, const std::string& 
     ok = out.seekSet(0) && out.write(header, sizeof(header)) == sizeof(header);
   }
   if (!ok) {
-    LOG_ERR("DICT", "Index build failed, removing %s", sidecarPath.c_str());
+    if (!cancelled) LOG_ERR("DICT", "Index build failed, removing %s", sidecarPath.c_str());
     out.close();  // close before remove of the same path
     Storage.remove(sidecarPath.c_str());
-    return fail(IndexResult::ReadError);
+    return fail(cancelled ? IndexResult::Cancelled : IndexResult::ReadError);
   }
 
   LOG_INF("DICT", "Indexed %lu entries (%lu samples) from %s in %lu ms", static_cast<unsigned long>(entryCount),

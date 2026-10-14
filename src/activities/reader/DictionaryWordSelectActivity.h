@@ -30,11 +30,13 @@ class DictionaryWordSelectActivity final : public Activity {
   // `highlights` is the reader's per-book list; this activity edits it in
   // place and persists it to `bookPath`'s highlight file. Choosing Go to on a
   // linked word stores the link's href in `followHref` and finishes; the
-  // reader navigates there.
+  // reader navigates there. Lookups favour dictionaries serving
+  // `bookLanguage` (the EPUB's dc:language) over the rest.
   explicit DictionaryWordSelectActivity(GfxRenderer& renderer, MappedInputManager& mappedInput,
                                         std::unique_ptr<Page> page, int marginLeft, int marginTop, Mode mode,
                                         bool lookupAvailable, std::vector<HighlightEntry>& highlights,
-                                        std::string bookPath, uint16_t spineIndex, std::string& followHref)
+                                        std::string bookPath, std::string bookLanguage, uint16_t spineIndex,
+                                        std::string& followHref)
       : Activity("DictionaryWordSelect", renderer, mappedInput),
         page(std::move(page)),
         marginLeft(marginLeft),
@@ -43,6 +45,7 @@ class DictionaryWordSelectActivity final : public Activity {
         lookupAvailable(lookupAvailable),
         highlights(highlights),
         bookPath(std::move(bookPath)),
+        bookLanguage(std::move(bookLanguage)),
         spineIndex(spineIndex),
         followHref(followHref) {}
 
@@ -126,6 +129,7 @@ class DictionaryWordSelectActivity final : public Activity {
   const bool lookupAvailable;
   std::vector<HighlightEntry>& highlights;
   const std::string bookPath;
+  const std::string bookLanguage;
   const uint16_t spineIndex;
   std::string& followHref;
   int fontId = 0;

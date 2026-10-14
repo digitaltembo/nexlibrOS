@@ -43,7 +43,10 @@ DictWork* newWork(lua_State* L) {
   return work;
 }
 
-void indexYield(void*) { vTaskDelay(1); }
+bool indexYield(void*) {
+  vTaskDelay(1);
+  return true;
+}
 
 // Truncates text to at most maxBytes without splitting a UTF-8 sequence.
 void truncateUtf8(std::string& text, const size_t maxBytes) {

@@ -388,7 +388,7 @@ std::unique_ptr<DictionaryWordSelectActivity> EpubReaderActivity::makeDictionary
   return std::make_unique<DictionaryWordSelectActivity>(
       renderer, mappedInput, std::move(page), orientedMarginLeft, orientedMarginTop,
       highlightMode ? Mode::Highlight : Mode::Lookup, SETTINGS.dictionaryName[0] != '\0', cachedHighlights,
-      epub->getPath(), static_cast<uint16_t>(currentSpineIndex), pendingWordLinkHref);
+      epub->getPath(), epub->getLanguage(), static_cast<uint16_t>(currentSpineIndex), pendingWordLinkHref);
 }
 
 void EpubReaderActivity::openFootnoteSelect(const bool reopenMenuOnCancel) {

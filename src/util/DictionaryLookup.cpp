@@ -3,9 +3,11 @@
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
 
-namespace {
-void indexBuildYield(void*) { vTaskDelay(1); }
-}  // namespace
+bool DictionaryLookup::indexBuildYield(void* self) {
+  vTaskDelay(1);
+  const auto* cancel = static_cast<const DictionaryLookup*>(self)->cancelFlag;
+  return !cancel || !cancel->load();
+}
 
 bool DictionaryLookup::prepare(const char* folderName) {
   if (!opened || openName != folderName) {
@@ -26,7 +28,7 @@ bool DictionaryLookup::lookup(const char* word, std::string& definitionOut, std:
   }
   if (needsIndex) {
     Dictionary::IndexResult indexResult = Dictionary::IndexResult::Ok;
-    if (!dict.buildIndex(&indexBuildYield, nullptr, &indexResult)) {
+    if (!dict.buildIndex(&indexBuildYield, this, &indexResult)) {
       // An index build allocates a scan buffer, so it fails the same way
       // lookups do on a fragmented heap — name that rather than a generic error.
       errorOut = indexResult == Dictionary::IndexResult::LowMemory   ? StrId::STR_DICT_LOW_MEMORY

@@ -1,8 +1,10 @@
 #include "DictionaryDefinitionActivity.h"
 
+#include <Arduino.h>
 #include <FontCacheManager.h>
 #include <GfxRenderer.h>
 #include <I18n.h>
+#include <Memory.h>
 
 #include <algorithm>
 #include <cstdint>
@@ -37,17 +39,135 @@ constexpr int TAB_PILL_PAD_X = 8;
 constexpr int TAB_PILL_INSET_Y = 6;
 constexpr int TAB_PILL_RADIUS = 6;
 constexpr int TAB_BODY_GAP = 10;  // tab divider to the first line of the definition
+constexpr const char* TAB_SEARCHING_LABEL = "...";
+
+// Free heap a tab switch keeps beyond its definition copy: std::string growth
+// aborts on OOM under -fno-exceptions.
+constexpr size_t TAB_COPY_HEADROOM_BYTES = 8 * 1024;
+
+// The background task only runs lookups (no layout or rendering), the same
+// call depth the 8KB loop task needs for them. Below the loop and render
+// tasks' priority, so it works only while the shown definition and input
+// handling are idle.
+constexpr uint32_t BG_TASK_STACK_BYTES = 8 * 1024;
+constexpr UBaseType_t BG_TASK_PRIORITY = 0;  // tskIDLE_PRIORITY, which the simulator shim lacks
 
 }  // namespace
 
 void DictionaryDefinitionActivity::onEnter() {
   Activity::onEnter();
-  if (dictLookup) DictionaryRegistry::discover(dictionaries);
-  for (size_t i = 0; i < dictionaries.size(); i++) {
-    if (dictionaries[i].name == initialDictionary) activeTab = static_cast<int>(i);
+  if (dictLookup && !dictionaries.empty()) {
+    tabs.reserve(dictionaries.size());  // never reallocates while tabs arrive
+    DictResult first;
+    first.name = std::move(dictionaries[0].name);
+    first.headword = headword;
+    first.found = true;
+    first.html = htmlDefinition;
+    // layoutDefinition() consumes `definition`; a copy lets this tab come
+    // back without a lookup.
+    size_t budget = RESULT_CACHE_BYTES;
+    if (tabBand && definition.size() <= budget &&
+        ESP.getMaxAllocHeap() >= definition.size() + TAB_COPY_HEADROOM_BYTES) {
+      first.definition = definition;
+      first.retained = true;
+      budget -= definition.size();
+    }
+    tabs.push_back(std::move(first));
+
+    bgSlots.reserve(dictionaries.size() - 1);
+    for (size_t i = 1; i < dictionaries.size(); i++) {
+      bgSlots.emplace_back();
+      bgSlots.back().name = std::move(dictionaries[i].name);
+    }
+    bgCacheBudget = budget;
+    std::vector<DictionaryEntry>().swap(dictionaries);
   }
   layoutDefinition();
+  startBackgroundLookups();
   requestUpdate();
+}
+
+void DictionaryDefinitionActivity::startBackgroundLookups() {
+  if (bgSlots.empty()) return;
+  // Its own Dictionary: the caller's stays open on the word-select side, and
+  // keeping the task's state separate means no handle is shared across tasks.
+  bgLookup = makeUniqueNoThrow<DictionaryLookup>();
+  bgDone = xSemaphoreCreateBinary();
+  if (bgLookup) bgLookup->setCancelFlag(&bgCancel);
+  if (!bgLookup || !bgDone ||
+      xTaskCreate(&DictionaryDefinitionActivity::backgroundTrampoline, "DictLookup", BG_TASK_STACK_BYTES, this,
+                  BG_TASK_PRIORITY, &bgTask) != pdPASS) {
+    LOG_ERR("DDA", "OOM: background lookup task (max block %u)", static_cast<unsigned>(ESP.getMaxAllocHeap()));
+    bgTask = nullptr;
+    stopBackgroundLookups();
+    bgSlots.clear();  // no "..." for lookups that will never run
+  }
+}
+
+void DictionaryDefinitionActivity::stopBackgroundLookups() {
+  if (bgTask) {
+    bgCancel.store(true);
+    // No timeout: deleting the task mid-lookup could leave storageMutex held.
+    // The wait is bounded — the task checks bgCancel between dictionaries and
+    // every 64KB of an index build.
+    xSemaphoreTake(bgDone, portMAX_DELAY);
+    bgTask = nullptr;
+  }
+  if (bgDone) {
+    vSemaphoreDelete(bgDone);
+    bgDone = nullptr;
+  }
+  bgLookup.reset();
+}
+
+void DictionaryDefinitionActivity::backgroundTrampoline(void* param) {
+  static_cast<DictionaryDefinitionActivity*>(param)->backgroundMain();
+}
+
+void DictionaryDefinitionActivity::backgroundMain() {
+  // Read once: after the last publish loop() may free bgSlots.
+  const size_t count = bgSlots.size();
+  DictResult* const slots = bgSlots.data();
+  for (size_t i = 0; i < count && !bgCancel.load(); i++) {
+    DictResult& slot = slots[i];
+    bgLookup->prepare(slot.name.c_str());
+    StrId error = StrId::STR_DICT_NOT_FOUND;
+    slot.found = bgLookup->lookup(lookupWord.c_str(), slot.definition, slot.headword, error);
+    if (slot.found) {
+      slot.html = bgLookup->definitionsAreHtml();
+      slot.retained = slot.definition.size() <= bgCacheBudget;
+      if (slot.retained) bgCacheBudget -= slot.definition.size();
+    } else {
+      LOG_DBG("DDA", "'%s' not in %s (%s)", lookupWord.c_str(), slot.name.c_str(), I18N.get(error));
+    }
+    if (!slot.retained) {
+      std::string().swap(slot.definition);
+    }
+    bgPublished.store(i + 1);
+  }
+  xSemaphoreGive(bgDone);
+  vTaskDelete(nullptr);
+}
+
+bool DictionaryDefinitionActivity::collectBackgroundResults() {
+  if (!searching()) return false;
+  const size_t published = bgPublished.load();
+  if (published == bgCollected) return false;
+
+  {
+    RenderLock lock;
+    for (; bgCollected < published; bgCollected++) {
+      DictResult& slot = bgSlots[bgCollected];
+      if (slot.found) tabs.push_back(std::move(slot));
+    }
+    if (!searching()) std::vector<DictResult>().swap(bgSlots);
+  }
+  if (bgSlots.empty()) {
+    // Every slot published: the task has given bgDone (or is about to) and
+    // needs nothing more from this activity.
+    stopBackgroundLookups();
+  }
+  return true;
 }
 
 void DictionaryDefinitionActivity::layoutDefinition() {
@@ -70,19 +190,45 @@ void DictionaryDefinitionActivity::clearContent() {
 }
 
 void DictionaryDefinitionActivity::switchTab(const int index) {
-  if (index == activeTab || index < 0 || index >= static_cast<int>(dictionaries.size())) return;
-  activeTab = index;
-  busy = true;
-  busyMessage =
-      dictLookup->prepare(dictionaries[index].name.c_str()) ? StrId::STR_DICT_INDEXING : StrId::STR_DICT_LOOKING_UP;
-  requestUpdateAndWait();  // paint the new tab + busy popup before blocking on SD
+  if (index == activeTab || index < 0 || index >= static_cast<int>(tabs.size())) return;
+  showTab(index);
+}
 
-  // Drop the old definition before reading the new one so both are never
-  // resident at once.
+void DictionaryDefinitionActivity::showTab(const int index) {
+  DictResult& tab = tabs[index];
   {
     RenderLock lock;
+    activeTab = index;
+    // Drop the old definition before taking the new one so both are never
+    // resident at once.
     clearContent();
+    if (tab.retained && ESP.getMaxAllocHeap() >= tab.definition.size() + TAB_COPY_HEADROOM_BYTES) {
+      busy = false;
+      hasMessage = false;
+      deferredTab = -1;
+      headword = tab.headword;
+      definition = tab.definition;
+      htmlDefinition = tab.html;
+      layoutDefinition();
+    } else {
+      // Re-read from SD. While the task runs that waits for it to finish.
+      busy = true;
+      busyMessage = StrId::STR_DICT_LOOKING_UP;
+      headword = tab.headword;
+      deferredTab = bgTask ? index : -1;
+    }
   }
+  if (!busy) {
+    requestUpdate();
+    return;
+  }
+  if (deferredTab >= 0) {
+    requestUpdate();  // loop() resumes this once the background task is done
+    return;
+  }
+
+  if (dictLookup->prepare(tab.name.c_str())) busyMessage = StrId::STR_DICT_INDEXING;
+  requestUpdateAndWait();  // paint the new tab + busy popup before blocking on SD
 
   std::string newDefinition;
   std::string newHeadword;
@@ -98,11 +244,14 @@ void DictionaryDefinitionActivity::switchTab(const int index) {
       htmlDefinition = dictLookup->definitionsAreHtml();
       layoutDefinition();
     } else {
-      headword = Dictionary::cleanWord(lookupWord.c_str());
       message = error;
     }
   }
   requestUpdate();
+}
+
+const char* DictionaryDefinitionActivity::slotLabel(const int index) const {
+  return index < static_cast<int>(tabs.size()) ? tabs[index].name.c_str() : TAB_SEARCHING_LABEL;
 }
 
 Rect DictionaryDefinitionActivity::contentRect() const {
@@ -128,11 +277,11 @@ Rect DictionaryDefinitionActivity::tabBarRect() const {
 // its label and the spare width is shared out; otherwise the slots are equal
 // and drawTabs() truncates the labels to fit.
 void DictionaryDefinitionActivity::tabSlot(const Rect& bar, const int index, int& x, int& width) const {
-  const int count = static_cast<int>(dictionaries.size());
+  const int count = slotCount();
   const int innerX = bar.x + SIDE_PADDING;
   const int innerWidth = bar.width - 2 * SIDE_PADDING;
   const auto naturalWidth = [this](const int i) {
-    return renderer.getTextWidth(TAB_FONT_ID, dictionaries[i].name.c_str()) + 2 * TAB_PILL_PAD_X;
+    return renderer.getTextWidth(TAB_FONT_ID, slotLabel(i)) + 2 * TAB_PILL_PAD_X;
   };
 
   int total = 0;
@@ -152,7 +301,7 @@ int DictionaryDefinitionActivity::tabAt(const int x, const int y) const {
   if (!showTabs()) return -1;
   const Rect bar = tabBarRect();
   if (y < bar.y || y >= bar.y + bar.height) return -1;
-  for (int i = 0; i < static_cast<int>(dictionaries.size()); i++) {
+  for (int i = 0; i < static_cast<int>(tabs.size()); i++) {
     int slotX = 0;
     int slotWidth = 0;
     tabSlot(bar, i, slotX, slotWidth);
@@ -162,8 +311,8 @@ int DictionaryDefinitionActivity::tabAt(const int x, const int y) const {
 }
 
 int DictionaryDefinitionActivity::bodyTop() const {
-  const Rect tabs = tabBarRect();
-  return tabs.y + tabs.height + (showTabs() ? TAB_BODY_GAP : 0);
+  const Rect bar = tabBarRect();
+  return bar.y + bar.height + (showTabs() ? TAB_BODY_GAP : 0);
 }
 
 void DictionaryDefinitionActivity::drawTabs(const Rect rect) const {
@@ -171,12 +320,12 @@ void DictionaryDefinitionActivity::drawTabs(const Rect rect) const {
   const int pillY = rect.y + TAB_PILL_INSET_Y;
   const int pillHeight = rect.height - 2 * TAB_PILL_INSET_Y;
 
-  for (int i = 0; i < static_cast<int>(dictionaries.size()); i++) {
+  const int count = slotCount();
+  for (int i = 0; i < count; i++) {
     int slotX = 0;
     int slotWidth = 0;
     tabSlot(rect, i, slotX, slotWidth);
-    const std::string label =
-        renderer.truncatedText(TAB_FONT_ID, dictionaries[i].name.c_str(), slotWidth - 2 * TAB_PILL_PAD_X);
+    const std::string label = renderer.truncatedText(TAB_FONT_ID, slotLabel(i), slotWidth - 2 * TAB_PILL_PAD_X);
     const int pillWidth = renderer.getTextWidth(TAB_FONT_ID, label.c_str()) + 2 * TAB_PILL_PAD_X;
     const int pillX = slotX + (slotWidth - pillWidth) / 2;
     const bool selected = i == activeTab;
@@ -191,6 +340,7 @@ void DictionaryDefinitionActivity::drawTabs(const Rect rect) const {
 }
 
 void DictionaryDefinitionActivity::onExit() {
+  stopBackgroundLookups();
   Activity::onExit();
   if (auto* fcm = renderer.getFontCacheManager()) {
     fcm->releaseSdFontCaches();
@@ -337,12 +487,20 @@ void DictionaryDefinitionActivity::wrapText() {
 }
 
 void DictionaryDefinitionActivity::loop() {
+  if (collectBackgroundResults()) requestUpdate();
+  if (deferredTab >= 0 && !bgTask) {
+    const int index = deferredTab;
+    deferredTab = -1;
+    showTab(index);
+    return;
+  }
+
   if (mappedInput.wasReleased(MappedInputManager::Button::Back)) {
     finish();
     return;
   }
-  if (showTabs() && mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
-    switchTab((activeTab + 1) % static_cast<int>(dictionaries.size()));
+  if (tabs.size() > 1 && mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
+    switchTab((activeTab + 1) % static_cast<int>(tabs.size()));
     return;
   }
 
@@ -415,8 +573,8 @@ void DictionaryDefinitionActivity::render(RenderLock&&) {
   GUI.drawHeader(renderer, Rect{content.x, content.y + metrics.topPadding, content.width, metrics.headerHeight},
                  headword.c_str(), totalPages > 1 ? counter : nullptr);
 
-  const Rect tabs = tabBarRect();
-  if (showTabs()) drawTabs(tabs);
+  const Rect tabBar = tabBarRect();
+  if (showTabs()) drawTabs(tabBar);
 
   const int bodyX = content.x + SIDE_PADDING;
   const int bodyStartY = bodyTop();
@@ -435,7 +593,7 @@ void DictionaryDefinitionActivity::render(RenderLock&&) {
     drawBody(fontId, bodyX, bodyStartY);
   }
 
-  const auto labels = mappedInput.mapLabels(tr(STR_BACK), showTabs() ? tr(STR_DICTIONARY) : "",
+  const auto labels = mappedInput.mapLabels(tr(STR_BACK), tabs.size() > 1 ? tr(STR_DICTIONARY) : "",
                                             (currentPage > 0 ? "<" : ""), (currentPage + 1 < totalPages ? ">" : ""));
   GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
 

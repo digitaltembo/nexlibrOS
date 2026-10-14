@@ -183,45 +183,59 @@ void DictionaryWordSelectActivity::moveVertical(const int direction) {
 }
 
 void DictionaryWordSelectActivity::performLookup() {
+  // Dictionaries for the book's language come first (the configured default
+  // leading), so the definition shown is in that language whenever one has
+  // the word; the definition viewer looks it up in the rest in the background.
+  std::vector<DictionaryEntry> dictionaries;
+  DictionaryRegistry::discover(dictionaries);
+  DictionaryRegistry::orderForBook(dictionaries, bookLanguage, SETTINGS.dictionaryName);
+  if (dictionaries.empty()) {
+    popup = Popup::Error;
+    popupMsg = StrId::STR_DICT_NO_DICT_SET;
+    popupTime = millis();
+    requestUpdate();
+    return;
+  }
+
   popup = Popup::Busy;
-  popupMsg = dictLookup.prepare(SETTINGS.dictionaryName) ? StrId::STR_DICT_INDEXING : StrId::STR_DICT_LOOKING_UP;
+  popupMsg = dictLookup.prepare(dictionaries[0].name.c_str()) ? StrId::STR_DICT_INDEXING : StrId::STR_DICT_LOOKING_UP;
   requestUpdateAndWait();  // paint the page + busy popup before blocking on SD
 
   const char* text = words[selected].text;
   std::string definition;
   std::string headword;
-  // The default dictionary's failure is the one reported if no dictionary has
-  // the word.
+  // The first dictionary's failure is the one reported if none has the word.
   StrId error = StrId::STR_DICT_NOT_FOUND;
-  std::string foundIn;
+  size_t foundAt = dictionaries.size();
   if (dictLookup.lookup(text, definition, headword, error)) {
-    foundIn = SETTINGS.dictionaryName;
+    foundAt = 0;
   } else {
-    // Miss in the default dictionary: try every other installed one before
-    // reporting it.
-    std::vector<DictionaryEntry> dictionaries;
-    DictionaryRegistry::discover(dictionaries);
-    for (const auto& entry : dictionaries) {
-      if (entry.name == SETTINGS.dictionaryName) continue;
-      if (dictLookup.prepare(entry.name.c_str()) && popupMsg != StrId::STR_DICT_INDEXING) {
+    // Miss in the first dictionary: show the next one in order that has the
+    // word, so there is something to display before the background lookups.
+    for (size_t i = 1; i < dictionaries.size(); i++) {
+      if (dictLookup.prepare(dictionaries[i].name.c_str()) && popupMsg != StrId::STR_DICT_INDEXING) {
         popupMsg = StrId::STR_DICT_INDEXING;
         requestUpdateAndWait();
       }
       StrId otherError = StrId::STR_DICT_NOT_FOUND;
       if (dictLookup.lookup(text, definition, headword, otherError)) {
-        foundIn = entry.name;
+        foundAt = i;
         break;
       }
     }
   }
 
-  if (!foundIn.empty()) {
+  if (foundAt < dictionaries.size()) {
     popup = Popup::None;
+    // Dictionaries before the hit already missed; only those after it are
+    // left for the viewer's background lookups.
+    dictionaries.erase(dictionaries.begin(), dictionaries.begin() + static_cast<std::ptrdiff_t>(foundAt));
+    const bool html = dictLookup.definitionsAreHtml();
     // Back from the definition returns straight to the reader.
-    startActivityForResult(std::make_unique<DictionaryDefinitionActivity>(
-                               renderer, mappedInput, dictLookup, text, foundIn.c_str(), std::move(headword),
-                               std::move(definition), dictLookup.definitionsAreHtml()),
-                           [](const ActivityResult&) { finish(); });
+    startActivityForResult(
+        std::make_unique<DictionaryDefinitionActivity>(renderer, mappedInput, dictLookup, text, std::move(dictionaries),
+                                                       std::move(headword), std::move(definition), html),
+        [](const ActivityResult&) { finish(); });
     return;
   }
   popup = error == StrId::STR_DICT_NOT_FOUND ? Popup::NotFound : Popup::Error;
