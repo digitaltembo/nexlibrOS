@@ -6,14 +6,30 @@
 #include <string>
 #include <vector>
 
-// Result of an index search — file location of a definition without reading it.
+// Result of an index search — file locations of a headword's definitions
+// without reading them. A headword can own several consecutive .idx entries
+// (common in dictionaries converted from other formats, which split senses or
+// parts of speech into separate entries); all of them are kept, in index order.
 struct DictLocation {
-  uint32_t offset = 0;  // byte offset in .dict data
-  uint32_t size = 0;    // byte length in .dict data
+  static constexpr uint8_t MAX_ENTRIES = 8;
+  struct Span {
+    uint32_t offset = 0;  // byte offset in .dict data
+    uint32_t size = 0;    // byte length in .dict data
+  };
+  Span entries[MAX_ENTRIES];
+  uint8_t count = 0;
   bool found = false;
   // Set when the search was cut short by an .idx open or seek failure rather than
   // reaching a verdict, so a failed search isn't reported as a genuine miss.
   bool readError = false;
+
+  // Records one more entry; false once MAX_ENTRIES are held.
+  bool add(uint32_t offset, uint32_t size) {
+    if (count >= MAX_ENTRIES) return false;
+    entries[count++] = {offset, size};
+    found = true;
+    return count < MAX_ENTRIES;
+  }
 };
 
 // Slim StarDict reader: exact-match lookup with a synonym and mini stemming
@@ -83,7 +99,8 @@ class Dictionary {
   // Clean the word, look it up, and on a miss retry dictionary-authored
   // synonyms then mini stem variants (-'s/-s/-es/-ies/-ed/-ing). On a hit fills
   // the definition text (capped at MAX_DEFINITION_BYTES) and the headword as
-  // stored in the index. Returns true on a hit. *outResult (if provided)
+  // stored in the index. A headword with several entries yields all of them,
+  // joined by <hr/> in HTML dictionaries and a blank line otherwise. Returns true on a hit. *outResult (if provided)
   // reports the precise outcome so the UI can distinguish a genuine miss from a
   // decompression / low-memory / read failure.
   bool lookup(const char* word, std::string& definitionOut, std::string& matchedHeadwordOut,
@@ -158,8 +175,9 @@ class Dictionary {
   bool openSynonyms(LookupSession& session);
 
   // Bisect a sampled-offset sidecar (.qidx over .idx, .sidx over .syn) to the
-  // byte offset of the last sampled entry whose word is <= target, so the caller
-  // only has to linear-scan at most SAMPLE_INTERVAL entries from there. Returns
+  // byte offset of the last sampled entry whose word is < target, so the caller
+  // only has to linear-scan about SAMPLE_INTERVAL entries from there and starts
+  // ahead of any run of entries equal to target. Returns
   // 0 — scan source from the start — when sampleCount is 0 or a sample is
   // unreadable. Clobbers wordBuf.
   uint32_t bisectSamples(HalFile& sidecar, HalFile& source, uint32_t sampleCount, const char* target);
@@ -186,9 +204,15 @@ class Dictionary {
   // buildIndex() so each sidecar is rebuilt only when actually stale.
   static bool sidecarIsStale(const std::string& sourcePath, const std::string& sidecarPath, uint32_t magic);
 
-  // Read the definition at location. On failure returns false and, if outResult
-  // is given, sets it to the specific reason (Decompress / LowMemory / ReadError).
+  // Read and join the definitions at location. Fails (setting *outResult, if
+  // given, to Decompress / LowMemory / ReadError) only when the first entry
+  // can't be read; a later entry that can't be read or doesn't fit in memory
+  // ends the definition early instead.
   bool readDefinition(const DictLocation& location, std::string& out, LookupResult* outResult = nullptr);
+  // Append prefix plus size bytes of the entry at offset to out. out grows only
+  // after any .dict.dz extraction has released its inflate buffers; on failure
+  // it is left unchanged.
+  bool appendSpan(uint32_t offset, uint32_t size, const char* prefix, std::string& out, LookupResult* outResult);
   static void stemVariants(const std::string& word, std::vector<std::string>& out);
 
   // Read a null-terminated word from an open file into buf (max bufSize-1

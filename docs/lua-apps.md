@@ -182,7 +182,8 @@ granted with `read:/.dictionaries`.
 
 `dict.lookup` cleans the word and falls back to synonyms and English stems as
 the reader does. The definition is plain text (HTML is converted, paragraphs
-separated by `\n`), cut to 16KB. `err` is `"not found"`, `"not a
+separated by `\n`), cut to 16KB. A headword with several dictionary entries
+returns all of them, separated by a blank line. `err` is `"not found"`, `"not a
 dictionary"`, `"not enough memory"`, `"read failed"`, `"decompress failed"` or
 `"index failed"`.
 

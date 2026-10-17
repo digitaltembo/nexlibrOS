@@ -414,7 +414,9 @@ uint32_t Dictionary::bisectSamples(HalFile& sidecar, HalFile& source, uint32_t s
       lo = 0;  // unreadable sample: abandon the descent and scan from the start
       break;
     }
-    if (StringUtils::asciiCaseCmp(wordBuf, target) <= 0) {
+    // Strictly below target, so the scan starts before (never inside) a run
+    // of equal headwords.
+    if (StringUtils::asciiCaseCmp(wordBuf, target) < 0) {
       lo = mid;
     } else {
       hi = mid - 1;
@@ -429,11 +431,12 @@ uint32_t Dictionary::bisectSamples(HalFile& sidecar, HalFile& source, uint32_t s
 DictLocation Dictionary::locate(LookupSession& session, const char* target, std::string* matchedHeadwordOut) {
   DictLocation result;
 
-  // Bisect the sampled offsets to the last sample whose headword <= target.
+  // Bisect the sampled offsets to the last sample whose headword < target.
   const uint32_t startByte = bisectSamples(session.qidx, session.idx, session.sampleCount, target);
 
-  // Linear scan of at most SAMPLE_INTERVAL entries: headword NUL, BE32 offset,
-  // BE32 size. The index is sorted, so stop at the first headword > target.
+  // Linear scan of about SAMPLE_INTERVAL entries: headword NUL, BE32 offset,
+  // BE32 size. The index is sorted, so equal headwords are adjacent: collect
+  // them all and stop at the first headword > target.
   if (!session.idx.seekSet(startByte)) {
     LOG_ERR("DICT", "Index seek to %lu failed", static_cast<unsigned long>(startByte));
     result.readError = true;
@@ -450,11 +453,9 @@ DictLocation Dictionary::locate(LookupSession& session, const char* target, std:
 
     const int cmp = StringUtils::asciiCaseCmp(wordBuf, target);
     if (cmp == 0) {
-      result.offset = readBe32(suffix);
-      result.size = readBe32(suffix + 4);
-      result.found = true;
-      if (matchedHeadwordOut) *matchedHeadwordOut = wordBuf;
-      return result;
+      if (!result.found && matchedHeadwordOut) *matchedHeadwordOut = wordBuf;
+      if (!result.add(readBe32(suffix), readBe32(suffix + 4))) break;
+      continue;
     }
     if (cmp > 0) break;
   }
@@ -495,9 +496,7 @@ DictLocation Dictionary::locateByOrdinal(LookupSession& session, uint32_t ordina
   }
   if (static_cast<uint32_t>(session.idx.position()) >= session.idxSize) return result;
   if (readWordInto(session.idx, wordBuf, sizeof(wordBuf)) < 0 || session.idx.read(suffix, 8) != 8) return result;
-  result.offset = readBe32(suffix);
-  result.size = readBe32(suffix + 4);
-  result.found = true;
+  result.add(readBe32(suffix), readBe32(suffix + 4));
   if (matchedHeadwordOut) *matchedHeadwordOut = wordBuf;
   return result;
 }
@@ -509,11 +508,11 @@ DictLocation Dictionary::locateSynonym(LookupSession& session, const char* targe
     return result;
   }
 
-  // Bisect the sampled offsets to the last synonym <= target, same descent
+  // Bisect the sampled offsets to the last synonym < target, same descent
   // locate() runs over .qidx/.idx.
   const uint32_t startByte = bisectSamples(session.sidx, session.syn, session.synSampleCount, target);
 
-  // Linear scan of at most SAMPLE_INTERVAL entries: synonym NUL, BE32 ordinal.
+  // Linear scan of about SAMPLE_INTERVAL entries: synonym NUL, BE32 ordinal.
   // Sorted, so stop at the first synonym > target. Reading the ordinal before
   // calling locateByOrdinal() (which reuses wordBuf) avoids any aliasing.
   if (!session.syn.seekSet(startByte)) {
@@ -527,7 +526,16 @@ DictLocation Dictionary::locateSynonym(LookupSession& session, const char* targe
     if (session.syn.read(ordBytes, 4) != 4) break;
 
     const int cmp = StringUtils::asciiCaseCmp(wordBuf, target);
-    if (cmp == 0) return locateByOrdinal(session, readBe32(ordBytes), matchedHeadwordOut);
+    if (cmp == 0) {
+      // The ordinal names one entry of the headword; gather its whole run.
+      std::string headword;
+      const DictLocation entry = locateByOrdinal(session, readBe32(ordBytes), &headword);
+      if (!entry.found) return entry;
+      const DictLocation run = locate(session, headword.c_str(), matchedHeadwordOut);
+      if (run.found) return run;
+      if (matchedHeadwordOut) *matchedHeadwordOut = std::move(headword);
+      return entry;
+    }
     if (cmp > 0) break;
   }
   return result;
@@ -538,27 +546,56 @@ bool Dictionary::readDefinition(const DictLocation& location, std::string& out, 
     if (outResult) *outResult = r;
     return false;
   };
-  if (!location.found) return fail(LookupResult::NotFound);
-  const uint32_t size = std::min(location.size, MAX_DEFINITION_BYTES);
-  if (size == 0) {
-    LOG_ERR("DICT", "Zero-length definition entry");
-    return fail(LookupResult::ReadError);
-  }
+  if (!location.found || location.count == 0) return fail(LookupResult::NotFound);
 
-  // Refuse before touching the heap or the SD: std::string growth aborts on OOM
-  // (-fno-exceptions), and the extraction below transiently holds a chunk buffer
-  // plus a 32KB inflate window we'd rather not commit to a doomed lookup.
-  if (ESP.getMaxAllocHeap() < size + DEFINITION_HEAP_HEADROOM_BYTES) {
-    LOG_ERR("DICT", "Low heap for %lu byte definition", static_cast<unsigned long>(size));
-    return fail(LookupResult::LowMemory);
+  // <hr/> draws a rule in the styled viewer and becomes a paragraph break in
+  // the plain-text conversion.
+  const char* separator = htmlDefinitions ? "<hr/>" : "\n\n";
+  const size_t separatorLen = strlen(separator);
+  out.clear();
+  for (uint8_t i = 0; i < location.count; i++) {
+    const size_t start = out.empty() ? 0 : out.size() + separatorLen;
+    if (start >= MAX_DEFINITION_BYTES) break;
+    const uint32_t size = std::min<uint32_t>(location.entries[i].size, MAX_DEFINITION_BYTES - start);
+    if (size == 0) {
+      LOG_ERR("DICT", "Zero-length definition entry");
+      continue;
+    }
+
+    // Refuse before touching the heap or the SD: std::string growth aborts on
+    // OOM (-fno-exceptions), and the extraction below transiently holds a chunk
+    // buffer plus a 32KB inflate window we'd rather not commit to a doomed read.
+    if (ESP.getMaxAllocHeap() < start + size + DEFINITION_HEAP_HEADROOM_BYTES) {
+      LOG_ERR("DICT", "Low heap for %lu byte definition (entry %u of %u)", static_cast<unsigned long>(start + size),
+              static_cast<unsigned>(i + 1), static_cast<unsigned>(location.count));
+      if (out.empty()) return fail(LookupResult::LowMemory);
+      break;
+    }
+
+    LookupResult result = LookupResult::ReadError;
+    if (!appendSpan(location.entries[i].offset, size, out.empty() ? "" : separator, out, &result)) {
+      if (out.empty()) return fail(result);
+      LOG_ERR("DICT", "Entry %u of %u unreadable; definition cut short", static_cast<unsigned>(i + 1),
+              static_cast<unsigned>(location.count));
+      break;
+    }
   }
+  return out.empty() ? fail(LookupResult::ReadError) : true;
+}
+
+bool Dictionary::appendSpan(const uint32_t entryOffset, const uint32_t size, const char* prefix, std::string& out,
+                            LookupResult* outResult) {
+  const auto fail = [outResult](LookupResult r) {
+    if (outResult) *outResult = r;
+    return false;
+  };
 
   char pathBuf[PATH_BUF_BYTES];
   const char* path = pathBuf;
   uint32_t offset = 0;
   if (hasPlainDict) {
     if (!buildPath(pathBuf, sizeof(pathBuf), ".dict")) return fail(LookupResult::ReadError);
-    offset = location.offset;
+    offset = entryOffset;
   } else {
     if (!buildPath(pathBuf, sizeof(pathBuf), ".dict.dz")) return fail(LookupResult::ReadError);
     HalFile tmp = Storage.open(DICT_TMP_FILE, O_WRITE | O_CREAT | O_TRUNC);
@@ -567,7 +604,7 @@ bool Dictionary::readDefinition(const DictLocation& location, std::string& out, 
       return fail(LookupResult::ReadError);
     }
     DictZip::ExtractError xerr = DictZip::ExtractError::None;
-    if (!DictZip::extractEntry(pathBuf, location.offset, size, tmp, &xerr)) {
+    if (!DictZip::extractEntry(pathBuf, entryOffset, size, tmp, &xerr)) {
       // Map the specific extraction cause to the lookup result: allocation
       // failure (heap fragmentation) vs corrupt/truncated .dz vs an IO error.
       LOG_ERR("DICT", "dictzip extraction failed for %s (error %d)", basePath.c_str(), static_cast<int>(xerr));
@@ -598,11 +635,14 @@ bool Dictionary::readDefinition(const DictLocation& location, std::string& out, 
     LOG_ERR("DICT", "Seek to %lu failed", static_cast<unsigned long>(offset));
     return fail(LookupResult::ReadError);
   }
-  out.assign(size, '\0');
+  const size_t previous = out.size();
+  out.append(prefix);
+  const size_t start = out.size();
+  out.resize(start + size, '\0');
   // The bounds check above guarantees the bytes exist, so a short read is an IO
   // failure — surface it instead of returning a silently truncated definition.
-  if (dict.read(&out[0], size) != static_cast<int>(size)) {
-    out.clear();
+  if (dict.read(&out[start], size) != static_cast<int>(size)) {
+    out.resize(previous);
     return fail(LookupResult::ReadError);
   }
   return true;

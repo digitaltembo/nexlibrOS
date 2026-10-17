@@ -57,7 +57,7 @@ On the very first lookup with a dictionary (and again whenever the `.idx` or `.s
 
 ### How Lookup Works
 
-1. **Direct match** — the word is found as-is (case-insensitive) in the dictionary index. Surrounding punctuation is ignored.
+1. **Direct match** — the word is found as-is (case-insensitive) in the dictionary index. Surrounding punctuation is ignored. When the dictionary has several entries for the same headword (common in dictionaries converted from Kindle/mobi files, which give each sense or part of speech its own entry — e.g. Spanish *perro* the adjective and *perro* the noun), all of them are shown, one after another, separated by a rule.
 2. **Synonyms** — on a miss, if the dictionary ships a `.syn` file, alternate spellings and irregular forms recorded there are resolved to their headword (e.g. `oxen` → `ox`, `colour` → `color`). This step is skipped if the `.sidx` sidecar could not be built (e.g. transient low memory during indexing); the dictionary otherwise stays usable, and the build is retried the next time it is opened.
 3. **Stemming** — still no match: common English word forms are retried automatically: possessives and plurals (`dogs` → `dog`, `stories` → `story`) and verb endings (`walked` → `walk`, `running` → `run`, `making` → `make`).
 4. **Other dictionaries** — if the default dictionary still has no match, the other dictionaries are tried in turn (steps 1–3 each), those for the book's language first, and the first one with the word is shown.
