@@ -108,6 +108,7 @@ class LuaAppActivity final : public Activity {
   bool inDraw = false;
   int fontId = 0;
   uint8_t fontStyle = 0;
+  float lineCompression = 1.0f;  // reader line spacing when the "reader" font is set
   int keyboardCallbackRef = -2;  // LUA_NOREF
   // Allocated by the first gfx.photo call, so apps without photos don't pay for it.
   std::unique_ptr<Photo[]> photos;

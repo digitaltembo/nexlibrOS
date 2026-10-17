@@ -14,6 +14,7 @@
 #include <lua.hpp>
 #include <variant>
 
+#include "CrossPointSettings.h"
 #include "MappedInputManager.h"
 #include "activities/util/KeyboardEntryActivity.h"
 #include "components/UITheme.h"
@@ -34,11 +35,14 @@ constexpr MappedInputManager::SwipeDir SWIPES[] = {
     MappedInputManager::SwipeDir::Down};
 static_assert(sizeof(SWIPE_NAMES) / sizeof(SWIPE_NAMES[0]) == sizeof(SWIPES) / sizeof(SWIPES[0]));
 
-constexpr const char* FONT_NAMES[] = {"ui",     "ui_large", "small",   "sans12",  "sans14",  "sans16",
-                                      "sans18", "serif12",  "serif14", "serif16", "serif18", nullptr};
-constexpr int FONT_IDS[] = {UI_10_FONT_ID,        UI_12_FONT_ID,        SMALL_FONT_ID,       NOTOSANS_12_FONT_ID,
-                            NOTOSANS_14_FONT_ID,  NOTOSANS_16_FONT_ID,  NOTOSANS_18_FONT_ID, NOTOSERIF_12_FONT_ID,
-                            NOTOSERIF_14_FONT_ID, NOTOSERIF_16_FONT_ID, NOTOSERIF_18_FONT_ID};
+constexpr const char* FONT_NAMES[] = {"ui",      "ui_large", "small",   "sans12",  "sans14", "sans16", "sans18",
+                                      "serif12", "serif14",  "serif16", "serif18", "reader", nullptr};
+// "reader" (READER_FONT_ID) resolves to the reading font family and size from settings.
+constexpr int READER_FONT_ID = 0;
+constexpr int FONT_IDS[] = {UI_10_FONT_ID,        UI_12_FONT_ID,        SMALL_FONT_ID,        NOTOSANS_12_FONT_ID,
+                            NOTOSANS_14_FONT_ID,  NOTOSANS_16_FONT_ID,  NOTOSANS_18_FONT_ID,  NOTOSERIF_12_FONT_ID,
+                            NOTOSERIF_14_FONT_ID, NOTOSERIF_16_FONT_ID, NOTOSERIF_18_FONT_ID, READER_FONT_ID};
+static_assert(sizeof(FONT_NAMES) / sizeof(FONT_NAMES[0]) == sizeof(FONT_IDS) / sizeof(FONT_IDS[0]) + 1);
 constexpr const char* STYLE_NAMES[] = {"regular", "bold", "italic", "bold_italic", nullptr};
 constexpr const char* REFRESH_NAMES[] = {"fast", "half", "full", nullptr};
 constexpr HalDisplay::RefreshMode REFRESH_MODES[] = {HalDisplay::FAST_REFRESH, HalDisplay::HALF_REFRESH,
@@ -211,7 +215,9 @@ struct LuaAppBindings {
     auto& app = self(L);
     const int fontIndex = luaL_checkoption(L, 1, nullptr, FONT_NAMES);
     const int style = luaL_checkoption(L, 2, "regular", STYLE_NAMES);
-    app.fontId = FONT_IDS[fontIndex];
+    const bool reader = FONT_IDS[fontIndex] == READER_FONT_ID;
+    app.fontId = reader ? SETTINGS.getReaderFontId() : FONT_IDS[fontIndex];
+    app.lineCompression = reader ? SETTINGS.getReaderLineCompression() : 1.0f;
     app.fontStyle = static_cast<uint8_t>(style);
     return 0;
   }
@@ -235,7 +241,7 @@ struct LuaAppBindings {
   }
   static int lineHeight(lua_State* L) {
     auto& app = self(L);
-    lua_pushinteger(L, app.renderer.getLineHeight(app.fontId));
+    lua_pushinteger(L, app.renderer.getLineHeight(app.fontId, app.lineCompression));
     return 1;
   }
   // wrap(str, max_width [, max_lines]) -> { line, ... }
@@ -502,6 +508,7 @@ LuaAppActivity::LuaAppActivity(GfxRenderer& renderer, MappedInputManager& mapped
 void LuaAppActivity::onEnter() {
   Activity::onEnter();
   fontId = UI_10_FONT_ID;
+  lineCompression = 1.0f;
   stopRequested.store(false);
   queue = xQueueCreate(QUEUE_LENGTH, sizeof(Event));
   taskDone = xSemaphoreCreateBinary();

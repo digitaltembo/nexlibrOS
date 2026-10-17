@@ -27,14 +27,16 @@ local CHUNK = 6 * 1024     -- article bytes fetched per read
 local MAX_CHUNK = 16 * 1024 -- largest read, for a paragraph longer than CHUNK
 local MAX_TRAIL = 32        -- followed links remembered for Back
 
-local BODY = { "serif14", "regular" }
+-- Article text uses the reading font, size and line spacing from the reader settings.
+local BODY = { "reader", "regular" }
+local HEADING = { "reader", "bold" }
 local STYLES = {
-  heading2 = { "sans16", "bold" },
-  heading3 = { "sans14", "bold" },
-  heading4 = { "sans12", "bold" },
+  heading2 = HEADING,
+  heading3 = HEADING,
+  heading4 = HEADING,
   item = BODY,
-  infobox = { "sans12", "regular" },
-  note = { "sans12", "italic" },
+  infobox = BODY,
+  note = { "reader", "italic" },
   para = BODY,
 }
 
