@@ -65,7 +65,36 @@ bool UiListActivity::routeListTouch() {
   // release inside the uiReady window (tap-to-activate needed two taps), and
   // it costs a second e-ink refresh per tap.
   if (route.routed && app.invalidated()) requestUpdate();
-  return static_cast<bool>(route);  // dispatched to the action handler
+  if (route) return true;  // dispatched to the action handler
+  return route.routed && routePreviewTouch(route.snap);
+}
+
+bool UiListActivity::routePreviewTouch(const fui::InputSnapshot& snap) {
+  if (!snap.touchReleased && !snap.longPress) return false;
+  const int16_t bottom = listBottom.load();
+  const int16_t x = snap.touchX;
+  const int16_t y = snap.touchY;
+  if (y >= bottom) return false;
+  // Any row hit below the tap means it fell in a gap between full rows.
+  constexpr int16_t PROBE_STEP = 4;
+  fui::Interaction row;
+  for (int16_t probe = static_cast<int16_t>(y + PROBE_STEP); probe < bottom; probe += PROBE_STEP) {
+    if (app.hitPublished(x, probe, ACTION_ROW, row)) return false;
+  }
+  // The nearest row above must be the last full one, with the preview next.
+  for (int16_t probe = static_cast<int16_t>(y - PROBE_STEP); probe >= 0; probe -= PROBE_STEP) {
+    if (!app.hitPublished(x, probe, ACTION_ROW, row)) continue;
+    const int preview = row.value + 1;
+    if (preview >= listCount()) return false;
+    fui::ActionEvent event;
+    event.action = ACTION_ROW;
+    event.value = static_cast<int16_t>(preview);
+    event.longPress = snap.longPress;
+    onRowAction(event);
+    requestUpdate();
+    return true;
+  }
+  return false;
 }
 
 void UiListActivity::moveSelectionTo(const int index) {
@@ -115,6 +144,7 @@ void UiListActivity::syncListViewport(UiScreen& screen, fui::ListProps& props, c
   props.toggleWidth = 28;
   props.toggleHeight = 28;
   props.partialTrailingRow = true;
+  listBottom = screen.body().bottom();
   auto& n = activeNav();
   const int prevTop = n.top;
   const bool trusted = n.trusts(listCount());

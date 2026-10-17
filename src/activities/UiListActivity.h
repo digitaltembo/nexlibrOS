@@ -87,6 +87,12 @@ class UiListActivity : public Activity, protected UiAppHost {
   // Named apart from UiAppHost::routeTouch so the host overload stays visible
   // (not name-hidden) to subclasses with extra touch surfaces.
   bool routeListTouch();
+  // The SDK draws the clipped trailing preview row without a hit rect. Routes
+  // an otherwise unhandled tap below the last full row (and within the list)
+  // to that preview row.
+  bool routePreviewTouch(const freeink::ui::InputSnapshot& snap);
 
   const bool wantsTouchLongPress;
+  // Bottom edge of the last built list band (render task writes, loop reads).
+  std::atomic<int16_t> listBottom{-1};
 };
