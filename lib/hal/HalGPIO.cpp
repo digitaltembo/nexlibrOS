@@ -44,6 +44,13 @@ bool readBQ27220CurrentMA(int16_t* outCurrent) {
 }  // namespace X3GPIO
 
 namespace {
+// Set by the touch controller's INT edge; consumed by rawInputActive().
+DRAM_ATTR volatile bool touchIrqSeen = false;
+
+#if FREEINK_CAP_TOUCH
+void IRAM_ATTR touchIrqISR() { touchIrqSeen = true; }
+#endif
+
 constexpr char HW_NAMESPACE[] = "cphw";
 constexpr char NVS_KEY_DEV_OVERRIDE[] = "dev_ovr";  // 0=auto, 1=x4, 2=x3
 constexpr char NVS_KEY_DEV_CACHED[] = "dev_det";    // 0=unknown, 1=x4, 2=x3
@@ -150,6 +157,15 @@ void HalGPIO::begin() {
   _deviceType = DeviceType::X4;
 #endif
   inputMgr.begin();
+
+#if FREEINK_CAP_TOUCH
+  // The GT911 is polled, so the idle loop needs its INT line to cut a sleep
+  // slice short. CHANGE catches both pulse and level INT modes.
+  const auto& touch = BoardConfig::ACTIVE.touch;
+  if (inputMgr.hasTouch() && touch.controller == BoardConfig::TouchController::Gt911 && touch.irq >= 0) {
+    attachInterrupt(digitalPinToInterrupt(touch.irq), touchIrqISR, CHANGE);
+  }
+#endif
 }
 
 void HalGPIO::update() {
@@ -173,6 +189,10 @@ bool HalGPIO::wasAnyReleased() const { return inputMgr.wasAnyReleased(); }
 
 bool HalGPIO::rawInputActive() {
   if (inputMgr.isPowerButtonPhysicallyPressed()) return true;
+  if (touchIrqSeen) {
+    touchIrqSeen = false;
+    return true;
+  }
   InputManager::ButtonAdcSample g1{}, g2{};
   inputMgr.readButtonAdc(g1, g2);
   // The Xteink ladder idles at the ADC full-scale rail (~4095); every button band sits below 3900.

@@ -575,7 +575,9 @@ void KeyboardEntryActivity::loop() {
       }
       return;
     }
-    if (result.activeChanged) {
+    // A touch-down highlight would cost a full panel refresh ahead of the key's
+    // own repaint, so only repaint to clear one an earlier render drew.
+    if (result.activeChanged && interactions.activeIndex() < 0) {
       requestUpdate();
     }
     if (pressedDown || tapped) {
