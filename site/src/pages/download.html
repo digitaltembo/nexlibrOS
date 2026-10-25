@@ -1,0 +1,35 @@
+<!-- title: Download · nexlibrOS -->
+<!-- description: Download the nexlibrOS {{version}} firmware for the Xteink X4 Pro and install it from your browser. -->
+<!-- heading: Download -->
+<div class="prose">
+<div class="card">
+  <p class="eyebrow">Latest firmware</p>
+  <p class="big">nexlibrOS {{version}}</p>
+  <p>For the Xteink X4 Pro · {{firmware_size}}</p>
+  <p><a class="button" href="{{firmware_href}}" download>Download {{firmware_name}}</a></p>
+  <p class="small">SHA-256 <code class="hash">{{firmware_sha256}}</code></p>
+</div>
+
+<h2>Install over USB (recommended)</h2>
+<ol>
+  <li>Connect the X4 Pro to your computer with a USB-C cable, then wake and unlock it.</li>
+  <li>In Chrome or Edge, open the <a href="https://crosspointreader.com/#flash-tools">CrossPoint web flasher</a> and choose <b>Xteink X4Pro</b>.</li>
+  <li>Click <b>Custom .bin</b>, choose the file you downloaded, and start the flash. Keep the cable connected until it finishes and the reader restarts.</li>
+</ol>
+<p>If the browser's device picker does not list the reader, try another USB port or cable first. The CrossPoint README explains <a href="https://github.com/crosspoint-reader/crosspoint-reader#usb-locked-devices-xteink-unlocker">what to do with a USB-locked device</a>.</p>
+
+<h2>Update from the SD card</h2>
+<ol>
+  <li>Rename the download to <code>firmware.bin</code> and copy it to the root of the SD card.</li>
+  <li>On the reader, open <b>Settings → System → SD Card Firmware Update</b>.</li>
+</ol>
+
+<blockquote class="callout"><p class="callout-title">Note</p><p><b>Check for Updates</b> on the reader installs the latest <em>upstream CrossPoint</em> release, which replaces nexlibrOS. Update nexlibrOS from this page instead.</p></blockquote>
+
+<h2>Apps and books</h2>
+<p>The firmware does not include the Lua apps: copy them to <code>/apps/</code> on the SD card from the <a href="apps.html">Apps</a> page. Put books anywhere on the card, or send them with the File Transfer screen.</p>
+
+<h2>Going back</h2>
+<p>To return to CrossPoint, flash an <a href="https://github.com/crosspoint-reader/crosspoint-reader/releases">official release</a> the same way. Your books, settings and reading progress live on the SD card and are kept.</p>
+<p class="small">Older builds and the source: <a href="{{repo_url}}">{{repo}}</a>.</p>
+</div>

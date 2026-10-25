@@ -1,0 +1,11 @@
+version=3
+articles=43
+nonempty=43
+keys=481
+blocks=18
+block_raw=65536
+page_bytes=4096
+pages=2
+key_prefix=32
+stream_bytes=1176982
+built=2026-10-25

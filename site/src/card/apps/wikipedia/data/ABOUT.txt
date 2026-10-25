@@ -1,0 +1,7 @@
+A small sample pack for the demo: 43 English Wikipedia articles (site/wiki-sample-titles.txt),
+built with
+  scripts/wikipedia/build_wiki_pack.py --rest-cache CACHE --ranking site/wiki-sample-titles.txt --budget 0.5 --out site/src/card/apps/wikipedia/data
+
+Text from Wikipedia, https://en.wikipedia.org, by its contributors, under the Creative Commons
+Attribution-ShareAlike 4.0 License (https://creativecommons.org/licenses/by-sa/4.0/).
+Articles are shortened and reformatted for the reader.

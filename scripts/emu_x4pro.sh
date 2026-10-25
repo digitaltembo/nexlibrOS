@@ -1,13 +1,13 @@
 #!/bin/bash
 # Run the x4pro build in the esp32sim submodule's emulator, natively or in the browser.
 #
-#   scripts/emu_x4pro.sh sd BOOKS_DIR [SIZE_MB]  build .pio/emu/x4pro-sd.img (MBR + FAT32) holding BOOKS_DIR
+#   scripts/emu_x4pro.sh sd BOOKS_DIR [SIZE_MB]  build .pio/emu/x4pro-sd.img (MBR + FAT) holding BOOKS_DIR
 #   scripts/emu_x4pro.sh web                     stage the build and card for esp32sim's page; prints the URL
 #   scripts/emu_x4pro.sh cli [esp32sim args...]  boot the build in the native emulator with the card
 #
 # Build the firmware first (pio run -e x4pro) and the emulator (cargo build --release in esp32sim;
-# tools/wasm-build.sh there for the page). The card image is made with hdiutil, so `sd` is macOS
-# only; elsewhere, any raw MBR + FAT32 image works (mkfs.fat and mtools, for example).
+# tools/wasm-build.sh there for the page). The card is written by scripts/fat_image.py: FAT16 up
+# to 2 GB, FAT32 above; without SIZE_MB it is sized to fit.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -20,13 +20,10 @@ need() { for f in "$@"; do [ -f "$f" ] || { echo "missing: $f" >&2; exit 1; }; d
 
 case "${1:-}" in
   sd)
-    books="${2:?usage: $0 sd BOOKS_DIR [SIZE_MB]}"; size="${3:-64}"
+    books="${2:?usage: $0 sd BOOKS_DIR [SIZE_MB]}"
     [ -d "$books" ] || { echo "not a directory: $books" >&2; exit 1; }
-    tmp="$(mktemp -d)"; trap 'rm -rf "$tmp"' EXIT
-    hdiutil create -quiet -size "${size}m" -fs "MS-DOS FAT32" -volname X4SD -layout MBRSPUD -srcfolder "$books" "$tmp/card.dmg"
-    hdiutil convert -quiet "$tmp/card.dmg" -format UDTO -o "$tmp/card"
-    mkdir -p "$(dirname "$CARD")"; mv "$tmp/card.cdr" "$CARD"
-    echo "$CARD"
+    mkdir -p "$(dirname "$CARD")"
+    python3 "$ROOT/scripts/fat_image.py" "$CARD" "$books" ${3:+"$3"}
     ;;
   web)
     need "$BUILD/bootloader.bin" "$BUILD/partitions.bin" "$BUILD/firmware.bin" "$BOOT_APP0" "$CARD" "$SIM/web/wasm/esp32sim.wasm"

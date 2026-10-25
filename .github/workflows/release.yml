@@ -1,7 +1,9 @@
 name: Compile Release
 
 # Build and attach firmware only after a release is published. The release tag
-# supplies both the source revision and the version in each asset name.
+# supplies both the source revision and the version in each asset name. A full
+# release also rebuilds the website (site/, scripts/build_site.py) around the
+# X4 Pro build and deploys it to GitHub Pages; prereleases leave the site alone.
 
 on:
   release:
@@ -107,6 +109,84 @@ jobs:
           if-no-files-found: error
           retention-days: 1
           compression-level: 0
+
+      # The website hosts this build for download and boots it in its demo, which
+      # also needs the bootloader, the partition table and the OTA data image.
+      - name: Stage the website's firmware
+        if: matrix.device == 'x4pro' && !github.event.release.prerelease
+        env:
+          PIO_ENV: ${{ matrix.release_env }}
+        run: |
+          mkdir site-firmware
+          cp ".pio/build/${PIO_ENV}/bootloader.bin" ".pio/build/${PIO_ENV}/partitions.bin" ".pio/build/${PIO_ENV}/firmware.bin" site-firmware/
+          cp ~/.platformio/packages/framework-arduinoespressif32/tools/partitions/boot_app0.bin site-firmware/
+
+      - name: Upload the website's firmware
+        if: matrix.device == 'x4pro' && !github.event.release.prerelease
+        uses: actions/upload-artifact@v6
+        with:
+          name: site-firmware
+          path: site-firmware
+          if-no-files-found: error
+          retention-days: 1
+
+  deploy-site:
+    needs: build-release
+    if: ${{ !github.event.release.prerelease }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    concurrency:
+      group: pages
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.release.tag_name }}
+
+      # .gitmodules names esp32sim by SSH; the runner fetches the public repo over HTTPS.
+      # The site needs only esp32sim (its emulator and web page), not freeink-sdk.
+      - name: Check out esp32sim
+        run: |
+          git config --global url."https://github.com/".insteadOf "git@github.com:"
+          git submodule update --init --depth 1 esp32sim
+
+      - name: Download the X4 Pro build
+        uses: actions/download-artifact@v4
+        with:
+          name: site-firmware
+          path: .pio/build/x4pro-gh_release
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: esp32sim
+
+      - name: Build the emulator (WebAssembly)
+        run: esp32sim/tools/wasm-build.sh
+
+      - name: Fetch the ESP32-S3 mask ROM (Apache-2.0) and xterm.js (MIT), both pinned by SHA-256
+        run: |
+          esp32sim/tools/fetch-rom-elfs.sh esp32sim/web/wasm/fw
+          esp32sim/tools/fetch-web-vendor.sh
+
+      - name: Build the site
+        run: python3 scripts/build_site.py --env x4pro-gh_release --boot-app0 .pio/build/x4pro-gh_release/boot_app0.bin --out _site
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+      - id: deployment
+        uses: actions/deploy-pages@v4
 
   publish-release:
     needs: build-release

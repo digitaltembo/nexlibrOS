@@ -1,0 +1,16 @@
+<aside class="panel">
+  <a class="panel-back" href="index.html">← nexlibrOS</a>
+  <h1>Demo</h1>
+  <p>This boots the actual firmware image on <a href="https://github.com/mikroverk/esp32sim">esp32sim</a>, an ESP32 emulator compiled to WebAssembly. The SD card holds <i>Walden</i>, the user guide, and the bundled apps with a small sample of <a href="https://en.wikipedia.org">Wikipedia</a> (43 articles, <a href="https://creativecommons.org/licenses/by-sa/4.0/">CC BY-SA 4.0</a>); whatever you change is gone when you reload.</p>
+  <fieldset class="firmware">
+    <legend>Firmware</legend>
+    <div class="choices"></div>
+  </fieldset>
+  <div class="custom">
+    <label class="pick">Run your own build…<input type="file" accept=".bin,application/octet-stream"></label>
+    <p class="small">Choose or drop an X4 Pro image: <code>firmware.bin</code> from <code>pio run -e x4pro</code>, or a merged <code>firmware.factory.bin</code>. It is read in this tab, never uploaded. An app image boots with this site's bootloader and partition table.</p>
+  </div>
+  <p class="howto"><b>Tap</b> the screen to touch it. The left and right keys turn pages, the key above the right one is <b>Power</b> (hold it), the round pad is <b>Home</b>, and the small key on top is <b>Reset</b>, which restarts the firmware with a fresh card. On a keyboard: <kbd>←</kbd> <kbd>→</kbd>, <kbd>H</kbd> for Home and <kbd>P</kbd> for Power.</p>
+  <p class="status" role="status">Not started</p>
+  <p><a class="devlink" href="sim/run.html?wasm&amp;fw=nexlibros" target="_blank" rel="noopener">Developer view: console, serial and board state ↗</a></p>
+</aside>

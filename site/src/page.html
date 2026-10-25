@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>{{title}}</title>
+<meta name="description" content="{{description}}">
+<meta name="theme-color" content="#3d3a22">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Literata:ital,opsz,wght@0,7..72,400;0,7..72,600;1,7..72,400&family=Ubuntu:wght@400;500;700&display=swap">
+<link rel="stylesheet" href="style.css">
+</head>
+<body class="{{body_class}}">
+<div class="backdrop" aria-hidden="true"><div class="photo"></div><canvas class="light"></canvas></div>
+<div class="stage">
+{{outside}}
+<div class="device">
+  <span class="key key-reset" data-key="reset" title="Reset"></span>
+  <span class="key key-left" data-key="left" title="Previous page"></span>
+  <span class="key key-power" data-key="power" title="Power"></span>
+  <span class="key key-right" data-key="right" title="Next page"></span>
+  <div class="screen">
+{{screen}}
+  </div>
+  <a class="homepad" href="index.html" data-key="home" title="Home"><span class="visually-hidden">Home</span></a>
+</div>
+</div>
+<canvas class="light light-over" aria-hidden="true"></canvas>
+<script src="site.js"></script>
+{{scripts}}
+</body>
+</html>
