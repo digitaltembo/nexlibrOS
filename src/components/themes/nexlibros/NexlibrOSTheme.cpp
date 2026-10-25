@@ -1,4 +1,4 @@
-#include "NolanTheme.h"
+#include "NexlibrOSTheme.h"
 
 #include <Bitmap.h>
 #include <GfxRenderer.h>
@@ -127,7 +127,7 @@ void drawBookCard(GfxRenderer& renderer, const CardHomeLayout& layout, const int
 }
 }  // namespace
 
-CardHomeLayout NolanTheme::cardHomeLayout(const GfxRenderer& renderer) const {
+CardHomeLayout NexlibrOSTheme::cardHomeLayout(const GfxRenderer& renderer) const {
   const auto& metrics = UITheme::getInstance().getMetrics();
   const int width = renderer.getScreenWidth();
   const int height = renderer.getScreenHeight();
@@ -166,8 +166,9 @@ CardHomeLayout NolanTheme::cardHomeLayout(const GfxRenderer& renderer) const {
   return layout;
 }
 
-void NolanTheme::drawCardHome(GfxRenderer& renderer, const CardHomeLayout& layout, const std::vector<RecentBook>& books,
-                              const int* progress, const int selectorIndex) const {
+void NexlibrOSTheme::drawCardHome(GfxRenderer& renderer, const CardHomeLayout& layout,
+                                  const std::vector<RecentBook>& books, const int* progress,
+                                  const int selectorIndex) const {
   const int bookCount = std::min(static_cast<int>(books.size()), layout.cardCount);
   if (bookCount == 0) {
     drawEmptyRecents(renderer, layout.cards[0]);
@@ -186,7 +187,8 @@ void NolanTheme::drawCardHome(GfxRenderer& renderer, const CardHomeLayout& layou
   }
 }
 
-void NolanTheme::drawCardHomeCover(const GfxRenderer& renderer, const Rect rect, const std::string& thumbPath) const {
+void NexlibrOSTheme::drawCardHomeCover(const GfxRenderer& renderer, const Rect rect,
+                                       const std::string& thumbPath) const {
   // Paint the whole rect: HomeActivity snapshots it, so a narrow cover must
   // not capture whatever was drawn there before.
   renderer.fillRect(rect.x, rect.y, rect.width, rect.height, false);

@@ -17,12 +17,21 @@ inline constexpr const char* APPS_DIR = "/apps";
 inline constexpr const char* LIB_DIR = "/apps/.lib";
 inline constexpr const char* ENTRY_FILE = "index.lua";
 inline constexpr size_t MAX_PATH = 192;
+// Longest app directory name, so "/apps/<name>" fits LuaRuntime's buffer.
+inline constexpr size_t MAX_APP_NAME = 48;
 // "-- key: value" metadata comments are read from this many leading bytes of
 // ENTRY_FILE.
 inline constexpr size_t HEADER_BYTES = 512;
+// A "lookupHook:<fn>" permission entry offers <fn> in the reader's word
+// bubble; choosing it starts the app and calls the global <fn>(word).
+inline constexpr std::string_view LOOKUP_HOOK_PREFIX = "lookupHook:";
+inline constexpr size_t MAX_HOOK_NAME = 24;
 
 // Returns the trimmed value of a "-- key: value" comment line, or "".
 std::string_view headerValue(std::string_view line, std::string_view key);
+// Returns the function name of a "lookupHook:<fn>" entry, or "" when token is
+// not one or <fn> is not a Lua identifier of at most MAX_HOOK_NAME bytes.
+std::string_view lookupHookName(std::string_view token);
 }  // namespace luapaths
 
 // Sandboxed Lua 5.4 state for SD apps: capped allocator, cooperative stop

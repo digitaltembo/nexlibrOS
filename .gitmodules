@@ -2,3 +2,6 @@
 	path = freeink-sdk
 	url = https://github.com/Free-Ink/freeink-sdk.git
 	branch = main
+[submodule "esp32sim"]
+	path = esp32sim
+	url = git@github.com:digitaltembo/esp32sim.git

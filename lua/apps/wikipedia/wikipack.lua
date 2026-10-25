@@ -2,7 +2,7 @@
 --
 --   local wikipack = require("wikipack")
 --   local pack, err = wikipack.open("data")
---   pack:search("einstein", 20)  -> { { id, title, via }, ... }  (via: matched redirect key or nil)
+--   pack:search("einstein", 20)  -> { { id, title, via, exact }, ... }  (via: matched redirect key or nil)
 --   pack:size(id), pack:title(id)
 --   pack:read(id, skip, len)    -> bytes [skip, skip+len) of the article text (len <= 16KB)
 --   pack:random()               -> id of a random article with text
@@ -158,7 +158,7 @@ function wikipack:search(query, limit, scan_pages)
   end
   local out = {}
   for i, hit in ipairs(best) do
-    out[i] = { id = hit.id, title = self:title(hit.id), via = hit.via }
+    out[i] = { id = hit.id, title = self:title(hit.id), via = hit.via, exact = hit.exact }
   end
   return out
 end

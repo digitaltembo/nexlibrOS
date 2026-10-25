@@ -502,8 +502,12 @@ struct LuaAppBindings {
 };
 
 LuaAppActivity::LuaAppActivity(GfxRenderer& renderer, MappedInputManager& mappedInput, std::string scriptPath,
-                               std::string appName)
-    : Activity("LuaApp", renderer, mappedInput), scriptPath(std::move(scriptPath)), appName(std::move(appName)) {}
+                               std::string appName, std::string hookFunction, std::string hookWord)
+    : Activity("LuaApp", renderer, mappedInput),
+      scriptPath(std::move(scriptPath)),
+      appName(std::move(appName)),
+      hookFunction(std::move(hookFunction)),
+      hookWord(std::move(hookWord)) {}
 
 void LuaAppActivity::onEnter() {
   Activity::onEnter();
@@ -608,12 +612,11 @@ void LuaAppActivity::loop() {
     return;
   }
 
+  // wasReleased(Back) already counts the back gesture.
   for (size_t i = 0; i < static_cast<size_t>(AppButton::Count); i++) {
     if (mappedInput.wasReleased(BUTTONS[i])) postEvent({EventType::Button, static_cast<uint8_t>(i), 0, 0});
   }
-  if (mappedInput.wasBackGesture()) {
-    postEvent({EventType::Button, static_cast<uint8_t>(AppButton::Back), 0, 0});
-  } else if (!mappedInput.wasHomeGesture() && !mappedInput.wasLightPanelGesture()) {
+  if (!mappedInput.wasBackGesture() && !mappedInput.wasHomeGesture() && !mappedInput.wasLightPanelGesture()) {
     const auto swipe = mappedInput.wasSwipe();
     for (size_t i = 0; i < sizeof(SWIPES) / sizeof(SWIPES[0]); i++) {
       if (swipe == SWIPES[i]) postEvent({EventType::Swipe, static_cast<uint8_t>(i), 0, 0});
@@ -693,6 +696,13 @@ int LuaAppActivity::protectedStart(lua_State* L) {
   lua_pushfstring(L, "@%s/%s", self->appName.c_str(), luapaths::ENTRY_FILE);
   LuaRuntime::loadFile(L, self->scriptPath.c_str(), lua_tostring(L, -1));
   lua_call(L, 0, 0);
+  if (!self->hookFunction.empty()) {
+    if (lua_getglobal(L, self->hookFunction.c_str()) != LUA_TFUNCTION) {
+      luaL_error(L, "lookup hook '%s' is not a global function", self->hookFunction.c_str());
+    }
+    lua_pushlstring(L, self->hookWord.data(), self->hookWord.size());
+    lua_call(L, 1, 0);
+  }
   return 0;
 }
 

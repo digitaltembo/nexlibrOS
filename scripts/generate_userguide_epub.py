@@ -1,22 +1,45 @@
 #!/usr/bin/env python3
-"""Generate an EPUB from USER_GUIDE.md."""
+"""Generate an EPUB from USER_GUIDE.md, optionally followed by everything in docs/.
 
+Usage:
+  python3 scripts/generate_userguide_epub.py           # -> nexlibrOS_User_Guide.epub
+  python3 scripts/generate_userguide_epub.py --docs    # -> nexlibrOS_Documentation.epub
+
+Requires: markdown, lxml, Pillow.
+"""
+
+import argparse
 import html as _html
 import io
 import re
+import zipfile
+from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from pathlib import Path
 
 import markdown
-from ebooklib import epub
-from PIL import Image, ImageDraw, ImageFont
+from lxml import etree
+from lxml import html as lhtml
+from PIL import Image, ImageDraw, ImageFont, ImageOps
 
-ROOT = Path(__file__).parent.parent
+ROOT = Path(__file__).resolve().parent.parent
 SOURCE_MD = ROOT / "USER_GUIDE.md"
-OUTPUT_EPUB = ROOT / "CrossPoint_User_Guide.epub"
-LOGO_PNG = ROOT / "src/images/Logo120.png"
+DOCS_DIR = ROOT / "docs"
+OUTPUT_GUIDE = ROOT / "nexlibrOS_User_Guide.epub"
+OUTPUT_DOCS = ROOT / "nexlibrOS_Documentation.epub"
+COVER_ART = ROOT / "docs/images/userguide-cover.png"
 
 # Portrait cover dimensions matching the X4 display (480×800)
 COVER_W, COVER_H = 480, 800
+# Embedded images are converted to grayscale baseline JPEGs that fit this box
+IMAGE_MAX = (800, 800)
+
+FONT_CANDIDATES = [
+    ('/usr/share/fonts/truetype/liberation/LiberationSerif-Bold.ttf',
+     '/usr/share/fonts/truetype/liberation/LiberationSerif-Regular.ttf'),
+    ('/System/Library/Fonts/Supplemental/Times New Roman Bold.ttf',
+     '/System/Library/Fonts/Supplemental/Times New Roman.ttf'),
+]
 
 CSS = """
 body {
@@ -84,6 +107,8 @@ a { color: #1a6699; text-decoration: none; }
 
 hr { border: none; border-top: 1px solid #ccc; margin: 1.5em 0; }
 
+img { max-width: 100%; height: auto; }
+
 .callout {
     border-left: 4px solid #888;
     background: #f8f8f8;
@@ -92,9 +117,9 @@ hr { border: none; border-top: 1px solid #ccc; margin: 1.5em 0; }
     border-radius: 0 4px 4px 0;
 }
 
-.callout-note   { border-color: #2196F3; background: #e3f2fd; }
+.callout-note, .callout-important { border-color: #2196F3; background: #e3f2fd; }
 .callout-tip    { border-color: #4CAF50; background: #e8f5e9; }
-.callout-warning { border-color: #FF9800; background: #fff3e0; }
+.callout-warning, .callout-caution { border-color: #FF9800; background: #fff3e0; }
 
 .callout-title {
     font-weight: bold;
@@ -117,41 +142,46 @@ hr { border: none; border-top: 1px solid #ccc; margin: 1.5em 0; }
 """
 
 
-def make_cover_png() -> bytes:
-    """Generate a full-size (480×800) cover image with logo, title, and subtitle."""
-    cover = Image.new('RGB', (COVER_W, COVER_H), color=(255, 255, 255))
+@dataclass
+class Chapter:
+    file_name: str
+    title: str
+    source: Path
+    html: str
+    body: object = None  # parsed lxml element, set by build_epub
+
+
+@dataclass
+class TocEntry:
+    title: str
+    href: str
+    children: list = field(default_factory=list)
+
+
+def load_fonts():
+    for bold, regular in FONT_CANDIDATES:
+        try:
+            return ImageFont.truetype(bold, 52), ImageFont.truetype(regular, 32)
+        except OSError:
+            continue
+    default = ImageFont.load_default()
+    return default, default
+
+
+def make_cover_png(subtitle: str) -> bytes:
+    """Generate a full-size (480×800) cover: the artwork with the title and subtitle above it."""
+    # The artwork fills the screen and leaves its upper part blank for the text
+    with Image.open(COVER_ART) as art:
+        cover = art.convert('RGB').resize((COVER_W, COVER_H), Image.LANCZOS)
     draw = ImageDraw.Draw(cover)
 
-    # Paste logo centred at ~35% down the canvas
-    with Image.open(LOGO_PNG) as logo_raw:
-        if logo_raw.mode in ('RGBA', 'LA', 'P'):
-            bg = Image.new('RGB', logo_raw.size, (255, 255, 255))
-            bg.paste(logo_raw, mask=logo_raw.convert('RGBA').split()[3])
-            logo = bg
-        else:
-            logo = logo_raw.convert('RGB')
-
-    # Scale logo to 240×240 (half the cover width)
-    logo = logo.resize((240, 240), Image.LANCZOS)
-    logo_x = (COVER_W - 240) // 2
-    logo_y = int(COVER_H * 0.28)
-    cover.paste(logo, (logo_x, logo_y))
-
-    # Try to use a system font; fall back to default if unavailable
-    try:
-        font_title = ImageFont.truetype('/usr/share/fonts/truetype/liberation/LiberationSerif-Bold.ttf', 52)
-        font_sub = ImageFont.truetype('/usr/share/fonts/truetype/liberation/LiberationSerif-Regular.ttf', 32)
-    except OSError:
-        font_title = ImageFont.load_default()
-        font_sub = font_title
-
-    title = 'CrossPoint'
-    subtitle = 'User Guide'
+    font_title, font_sub = load_fonts()
+    title = 'nexlibrOS'
 
     # Draw title text
     bbox = draw.textbbox((0, 0), title, font=font_title)
     tw = bbox[2] - bbox[0]
-    ty = logo_y + 240 + 48
+    ty = int(COVER_H * 0.30)
     draw.text(((COVER_W - tw) // 2, ty), title, fill=(0, 0, 0), font=font_title)
 
     # Draw subtitle text
@@ -171,6 +201,32 @@ def make_cover_png() -> bytes:
     return buf.getvalue()
 
 
+def convert_image(path: Path) -> bytes:
+    """Shrink an image to fit the display as a grayscale baseline JPEG."""
+    with Image.open(path) as im:
+        im = ImageOps.exif_transpose(im).convert('L')
+        im.thumbnail(IMAGE_MAX, Image.LANCZOS)
+        buf = io.BytesIO()
+        im.save(buf, format='JPEG', quality=80, optimize=True)
+        return buf.getvalue()
+
+
+def github_slug(value: str, separator: str) -> str:
+    """Heading ids matching GitHub's, so `file.md#anchor` links resolve."""
+    value = re.sub(r'[^\w\- ]', '', value.strip().lower())
+    return value.replace(' ', separator)
+
+
+def render_markdown(text: str, with_ids: bool = True) -> str:
+    extensions = ['tables', 'fenced_code', 'attr_list']
+    configs = {}
+    if with_ids:
+        extensions.append('toc')
+        configs['toc'] = {'slugify': github_slug}
+    return markdown.markdown(text, extensions=extensions, extension_configs=configs,
+                             output_format='xhtml')
+
+
 def preprocess_callouts(text: str) -> str:
     """Convert GitHub-style > [!TYPE] callouts to HTML divs."""
     lines = text.splitlines()
@@ -178,7 +234,7 @@ def preprocess_callouts(text: str) -> str:
     i = 0
     while i < len(lines):
         line = lines[i]
-        m = re.match(r'^>\s*\[!(NOTE|TIP|WARNING)\]\s*$', line.strip())
+        m = re.match(r'^>\s*\[!(NOTE|TIP|IMPORTANT|WARNING|CAUTION)\]\s*$', line.strip())
         if m:
             kind = m.group(1).lower()
             title = kind.capitalize()
@@ -188,11 +244,11 @@ def preprocess_callouts(text: str) -> str:
                     and not re.match(r'^>\s*\[!', lines[i]):
                 body_lines.append(lines[i][1:].lstrip())
                 i += 1
-            body = _html.escape('\n'.join(body_lines).strip())
+            body = render_markdown('\n'.join(body_lines).strip(), with_ids=False)
             out.append(
                 f'\n<div class="callout callout-{kind}">'
                 f'<div class="callout-title">{title}</div>'
-                f'<p>{body}</p>'
+                f'{body}'
                 f'</div>\n'
             )
         else:
@@ -202,13 +258,8 @@ def preprocess_callouts(text: str) -> str:
 
 
 def strip_toc(text: str) -> str:
-    """Remove the inline TOC list that follows the H1 heading."""
-    return re.sub(
-        r'(\n# CrossPoint User Guide\n)(.*?)(\n## 1\.)',
-        lambda m: m.group(1) + m.group(3),
-        text,
-        flags=re.DOTALL,
-    )
+    """Remove the inline TOC: the first top-level `- [Title](#anchor)` item and its nested items."""
+    return re.sub(r'\n- \[[^\]]+\]\(#[^)]+\)\n(?:[ \t]+- .*\n)*', '\n', text, count=1)
 
 
 def split_chapters(html: str):
@@ -218,7 +269,7 @@ def split_chapters(html: str):
     positions = [(m.start(), m.group(0), m.group(2)) for m in pattern.finditer(html)]
 
     if not positions:
-        return [('intro', 'CrossPoint User Guide', html)]
+        return [('intro', 'nexlibrOS User Guide', html)]
 
     intro_html = html[:positions[0][0]].strip()
     if intro_html:
@@ -241,89 +292,252 @@ def split_chapters(html: str):
     return chapters
 
 
-def make_xhtml(title: str, body: str) -> bytes:
+def user_guide_chapters():
+    source = SOURCE_MD.read_text(encoding='utf-8')
+    source = preprocess_callouts(strip_toc(source))
+    return [Chapter(f'chap_{anchor}.xhtml', title, SOURCE_MD, fragment)
+            for anchor, title, fragment in split_chapters(render_markdown(source))]
+
+
+def doc_chapter(path: Path) -> Chapter:
+    body = render_markdown(preprocess_callouts(path.read_text(encoding='utf-8')))
+    m = re.search(r'<h1[^>]*>(.*?)</h1>', body, re.DOTALL)
+    title = _html.unescape(re.sub(r'<[^>]+>', '', m.group(1)).strip()) if m else path.stem
+    rel = path.relative_to(DOCS_DIR).with_suffix('')
+    slug = re.sub(r'[^a-z0-9]+', '-', str(rel).lower()).strip('-')
+    return Chapter(f'doc_{slug}.xhtml', title, path, body)
+
+
+def docs_groups():
+    """(group title, chapters) for docs/*.md, then docs/contributing/ (README first)."""
+    contributing = DOCS_DIR / 'contributing'
+    readme = contributing / 'README.md'
+    contrib_paths = ([readme] if readme.exists() else []) + \
+        sorted(p for p in contributing.glob('*.md') if p != readme)
+    groups = [
+        ('Documentation', [doc_chapter(p) for p in sorted(DOCS_DIR.glob('*.md'))]),
+        ('Contributing', [doc_chapter(p) for p in contrib_paths]),
+    ]
+    return [(title, chapters) for title, chapters in groups if chapters]
+
+
+def is_external(url: str) -> bool:
+    return bool(re.match(r'^[a-z][a-z0-9+.-]*:', url, re.IGNORECASE))
+
+
+def rewrite_links(chapter: Chapter, targets: dict):
+    """Point links at other bundled markdown files to their chapter files.
+
+    Links to anything not in the book (source files, SCOPE.md, ...) are unwrapped
+    to plain text since they can't be followed on the device.
+    """
+    for a in list(chapter.body.iter('a')):
+        href = a.get('href')
+        if not href or is_external(href):
+            continue
+        path_part, _, frag = href.partition('#')
+        target = (chapter.source.parent / path_part).resolve() if path_part else chapter.source
+        doc = targets.get(target)
+        if doc is None:
+            a.drop_tag()
+            continue
+        first_file, ids = doc
+        if frag and frag in ids:
+            a.set('href', f'{ids[frag]}#{frag}')
+        else:
+            a.set('href', first_file)
+
+
+def collect_images(chapter: Chapter, images: dict):
+    """Embed local images (converted for e-ink); drop remote ones the reader can't fetch."""
+    for img in list(chapter.body.iter('img')):
+        src = img.get('src', '')
+        path = None if is_external(src) else (chapter.source.parent / src).resolve()
+        if path is None or not path.is_file():
+            print(f'  Skipping image {src!r} in {chapter.source.relative_to(ROOT)}')
+            img.drop_tree()
+            continue
+        if path not in images:
+            name = re.sub(r'[^A-Za-z0-9]+', '-', str(path.relative_to(ROOT).with_suffix('')))
+            images[path] = (f'images/{name}.jpg', convert_image(path))
+        img.set('src', images[path][0])
+        img.attrib.pop('width', None)
+
+
+def make_xhtml(title: str, body_xml: str) -> str:
     return (
         '<?xml version="1.0" encoding="utf-8"?>\n'
-        '<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN" '
-        '"http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">\n'
-        '<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">\n'
-        f'<head><title>{title}</title>\n'
-        '<link rel="stylesheet" type="text/css" href="../style/main.css"/>\n'
-        f'</head>\n<body>\n{body}\n</body>\n</html>'
-    ).encode('utf-8')
-
-
-def build_epub():
-    source = SOURCE_MD.read_text(encoding='utf-8')
-    source = strip_toc(source)
-    source = preprocess_callouts(source)
-
-    md = markdown.Markdown(extensions=['tables', 'fenced_code', 'attr_list'])
-    body_html = md.convert(source)
-
-    book = epub.EpubBook()
-    book.set_identifier('crosspoint-user-guide-v1')
-    book.set_title('CrossPoint User Guide')
-    book.set_language('en')
-    book.add_author('CrossPoint Reader Project')
-
-    style = epub.EpubItem(
-        uid='style',
-        file_name='style/main.css',
-        media_type='text/css',
-        content=CSS,
+        '<!DOCTYPE html>\n'
+        '<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">\n'
+        f'<head><title>{_html.escape(title)}</title>\n'
+        '<link rel="stylesheet" type="text/css" href="style/main.css"/>\n'
+        f'</head>\n{body_xml}\n</html>\n'
     )
-    book.add_item(style)
 
-    # Full-size cover image (480×800) — used by CrossPoint for home-screen thumbnail.
-    # uid='cover-image' matches the EPUB 2 <meta name="cover" content="cover-image"/> value.
-    cover_png_bytes = make_cover_png()
-    cover_img_item = epub.EpubItem(
-        uid='cover-image',
-        file_name='images/cover.png',
-        media_type='image/png',
-        content=cover_png_bytes,
+
+def make_nav(toc) -> str:
+    def items(entries):
+        out = ['<ol>']
+        for e in entries:
+            out.append(f'<li><a href="{_html.escape(e.href)}">{_html.escape(e.title)}</a>')
+            if e.children:
+                out.append(items(e.children))
+            out.append('</li>')
+        out.append('</ol>')
+        return '\n'.join(out)
+
+    return (
+        '<?xml version="1.0" encoding="utf-8"?>\n'
+        '<!DOCTYPE html>\n'
+        '<html xmlns="http://www.w3.org/1999/xhtml" '
+        'xmlns:epub="http://www.idpf.org/2007/ops" xml:lang="en" lang="en">\n'
+        '<head><title>Contents</title></head>\n<body>\n'
+        f'<nav epub:type="toc" id="toc"><h1>Contents</h1>\n{items(toc)}\n</nav>\n'
+        '</body>\n</html>\n'
     )
-    cover_img_item.properties = ['cover-image']  # EPUB 3 manifest property
-    book.add_item(cover_img_item)
-    # EPUB 2 cover declaration — CrossPoint's Tier 1 OPF lookup
-    book.add_metadata('OPF', 'meta', '', {'name': 'cover', 'content': 'cover-image'})
 
-    # Cover page XHTML — first readable page in the spine
-    cover_page = epub.EpubHtml(title='CrossPoint User Guide', file_name='cover.xhtml', lang='en')
-    cover_page.content = make_xhtml(
-        'CrossPoint User Guide',
-        '<div class="cover-page">'
-        '<img src="images/cover.png" alt="CrossPoint User Guide cover"/>'
-        '</div>',
+
+def make_ncx(identifier: str, title: str, toc) -> str:
+    play_orders = {}
+    counter = [0]
+
+    def points(entries, depth):
+        out = []
+        for e in entries:
+            counter[0] += 1
+            order = play_orders.setdefault(e.href, len(play_orders) + 1)
+            pad = '  ' * depth
+            out.append(
+                f'{pad}<navPoint id="np{counter[0]}" playOrder="{order}">'
+                f'<navLabel><text>{_html.escape(e.title)}</text></navLabel>'
+                f'<content src="{_html.escape(e.href)}"/>'
+            )
+            out.extend(points(e.children, depth + 1))
+            out.append(f'{pad}</navPoint>')
+        return out
+
+    nav_points = '\n'.join(points(toc, 2))
+    return (
+        '<?xml version="1.0" encoding="utf-8"?>\n'
+        '<ncx xmlns="http://www.daisy.org/z3986/2005/ncx/" version="2005-1">\n'
+        f'<head><meta name="dtb:uid" content="{_html.escape(identifier)}"/></head>\n'
+        f'<docTitle><text>{_html.escape(title)}</text></docTitle>\n'
+        f'<navMap>\n{nav_points}\n</navMap>\n</ncx>\n'
     )
-    cover_page.add_item(style)
-    cover_page.add_item(cover_img_item)
-    book.add_item(cover_page)
 
-    chapters_data = split_chapters(body_html)
-    epub_chapters = []
 
-    for anchor, title, fragment in chapters_data:
-        filename = f'chap_{anchor}.xhtml'
-        chapter = epub.EpubHtml(title=title, file_name=filename, lang='en')
-        chapter.content = make_xhtml(title, fragment)
-        chapter.add_item(style)
-        book.add_item(chapter)
-        epub_chapters.append(chapter)
-
-    book.toc = (epub.Link('cover.xhtml', 'Cover', 'cover'),) + tuple(epub_chapters)
-    book.add_item(epub.EpubNcx())
-    book.add_item(epub.EpubNav())
-
+def make_opf(identifier: str, title: str, chapters, images) -> str:
+    modified = datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
+    manifest = [
+        '<item id="ncx" href="toc.ncx" media-type="application/x-dtbncx+xml"/>',
+        '<item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/>',
+        '<item id="style" href="style/main.css" media-type="text/css"/>',
+        # id matches the EPUB 2 <meta name="cover"> — CrossPoint's Tier 1 OPF cover lookup
+        '<item id="cover-image" href="images/cover.png" media-type="image/png" properties="cover-image"/>',
+        '<item id="cover" href="cover.xhtml" media-type="application/xhtml+xml"/>',
+    ]
+    manifest += [f'<item id="c{i}" href="{c.file_name}" media-type="application/xhtml+xml"/>'
+                 for i, c in enumerate(chapters)]
+    manifest += [f'<item id="img{i}" href="{href}" media-type="image/jpeg"/>'
+                 for i, (href, _data) in enumerate(images)]
     # nav is excluded from the spine — CrossPoint locates it via properties="nav" in
-    # the manifest and does not respect linear="no", so omitting it prevents it from
-    # appearing as a readable page. Cover is the first spine item.
-    book.spine = [cover_page] + epub_chapters
+    # the manifest and does not respect linear="no". Cover is the first spine item.
+    spine = ['<itemref idref="cover"/>'] + [f'<itemref idref="c{i}"/>' for i in range(len(chapters))]
+    nl = '\n    '
+    return (
+        '<?xml version="1.0" encoding="utf-8"?>\n'
+        '<package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="book-id">\n'
+        '  <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">\n'
+        f'    <dc:identifier id="book-id">{identifier}</dc:identifier>\n'
+        f'    <dc:title>{_html.escape(title)}</dc:title>\n'
+        '    <dc:language>en</dc:language>\n'
+        '    <dc:creator>CrossPoint Reader Project</dc:creator>\n'
+        f'    <meta property="dcterms:modified">{modified}</meta>\n'
+        '    <meta name="cover" content="cover-image"/>\n'
+        '  </metadata>\n'
+        f'  <manifest>\n    {nl.join(manifest)}\n  </manifest>\n'
+        f'  <spine toc="ncx">\n    {nl.join(spine)}\n  </spine>\n'
+        '</package>\n'
+    )
 
-    epub.write_epub(str(OUTPUT_EPUB), book)
-    print(f'Generated: {OUTPUT_EPUB}')
+
+CONTAINER_XML = (
+    '<?xml version="1.0" encoding="utf-8"?>\n'
+    '<container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container">\n'
+    '  <rootfiles><rootfile full-path="OEBPS/content.opf" '
+    'media-type="application/oebps-package+xml"/></rootfiles>\n'
+    '</container>\n'
+)
+
+
+def build_epub(include_docs: bool, output: Path):
+    if include_docs:
+        title, subtitle, identifier = 'nexlibrOS Documentation', 'Documentation', 'nexlibros-docs-v1'
+    else:
+        title, subtitle, identifier = 'nexlibrOS User Guide', 'User Guide', 'nexlibros-user-guide-v1'
+
+    guide = user_guide_chapters()
+    groups = docs_groups() if include_docs else []
+    chapters = guide + [c for _title, group in groups for c in group]
+
+    for c in chapters:
+        c.body = lhtml.fragment_fromstring(c.html, create_parent='body')
+
+    # source markdown path -> (first chapter file, {heading id: chapter file})
+    targets = {}
+    for c in chapters:
+        first_file, ids = targets.setdefault(c.source.resolve(), (c.file_name, {}))
+        for el in c.body.iter():
+            if isinstance(el.tag, str) and el.get('id'):
+                ids.setdefault(el.get('id'), c.file_name)
+
+    images = {}
+    for c in chapters:
+        c.source = c.source.resolve()
+        rewrite_links(c, targets)
+        collect_images(c, images)
+
+    guide_entries = [TocEntry(c.title, c.file_name) for c in guide]
+    toc = [TocEntry('Cover', 'cover.xhtml')]
+    if groups:
+        toc.append(TocEntry('User Guide', guide[0].file_name, guide_entries))
+        toc += [TocEntry(t, group[0].file_name, [TocEntry(c.title, c.file_name) for c in group])
+                for t, group in groups]
+    else:
+        toc += guide_entries
+
+    cover_body = ('<body><div class="cover-page">'
+                  f'<img src="images/cover.png" alt="{_html.escape(title)} cover"/>'
+                  '</div></body>')
+    image_list = list(images.values())
+
+    with zipfile.ZipFile(output, 'w', zipfile.ZIP_DEFLATED) as z:
+        z.writestr(zipfile.ZipInfo('mimetype'), 'application/epub+zip', compress_type=zipfile.ZIP_STORED)
+        z.writestr('META-INF/container.xml', CONTAINER_XML)
+        z.writestr('OEBPS/content.opf', make_opf(identifier, title, chapters, image_list))
+        z.writestr('OEBPS/toc.ncx', make_ncx(identifier, title, toc))
+        z.writestr('OEBPS/nav.xhtml', make_nav(toc))
+        z.writestr('OEBPS/style/main.css', CSS)
+        z.writestr('OEBPS/images/cover.png', make_cover_png(subtitle))
+        z.writestr('OEBPS/cover.xhtml', make_xhtml(title, cover_body))
+        for c in chapters:
+            body_xml = etree.tostring(c.body, encoding='unicode', method='xml')
+            z.writestr(f'OEBPS/{c.file_name}', make_xhtml(c.title, body_xml))
+        for href, data in image_list:
+            z.writestr(f'OEBPS/{href}', data)
+
+    print(f'Generated: {output} ({len(chapters)} chapters, {len(image_list)} images)')
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument('--docs', action='store_true',
+                        help='append docs/*.md and docs/contributing/*.md after the user guide')
+    parser.add_argument('-o', '--output', type=Path, help='output .epub path')
+    args = parser.parse_args()
+    output = args.output or (OUTPUT_DOCS if args.docs else OUTPUT_GUIDE)
+    build_epub(args.docs, output)
 
 
 if __name__ == '__main__':
-    build_epub()
+    main()

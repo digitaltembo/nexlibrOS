@@ -20,14 +20,12 @@ namespace fui = freeink::ui;
 
 namespace {
 constexpr size_t MAX_APPS = 64;
-// Room for "/apps/<name>" in LuaRuntime's app directory buffer.
-constexpr size_t MAX_APP_NAME = 48;
 
 // Writes the entry script path of app directory name into out; false when
 // name is hidden (".lib"), too long, or has no entry script.
 bool appEntryPath(const char* name, char* out, const size_t outLen) {
   const size_t len = strlen(name);
-  if (len == 0 || len > MAX_APP_NAME || name[0] == '.') return false;
+  if (len == 0 || len > luapaths::MAX_APP_NAME || name[0] == '.') return false;
   const int written = snprintf(out, outLen, "%s/%s/%s", luapaths::APPS_DIR, name, luapaths::ENTRY_FILE);
   return written > 0 && static_cast<size_t>(written) < outLen && Storage.exists(out);
 }
@@ -43,6 +41,45 @@ bool anyLuaAppInstalled() {
     if (entry.getName(name, sizeof(name)) > 0 && appEntryPath(name, path, sizeof(path))) return true;
   }
   return false;
+}
+
+size_t findLuaLookupHooks(LuaLookupHook* hooks, const size_t maxHooks) {
+  size_t count = 0;
+  HalFile dir = Storage.open(luapaths::APPS_DIR);
+  if (!dir || !dir.isDirectory()) return 0;
+  auto header = makeUniqueNoThrow<char[]>(luapaths::HEADER_BYTES + 1);
+  if (!header) {
+    LOG_ERR("LAPP", "OOM: app header buffer");
+    return 0;
+  }
+  char name[64];
+  char path[luapaths::MAX_PATH];
+  for (HalFile entry = dir.openNextFile(); entry && count < maxHooks; entry = dir.openNextFile()) {
+    if (!entry.isDirectory()) continue;
+    if (entry.getName(name, sizeof(name)) == 0 || !appEntryPath(name, path, sizeof(path))) continue;
+    const size_t got = Storage.readFileToBuffer(path, header.get(), luapaths::HEADER_BYTES + 1, luapaths::HEADER_BYTES);
+    std::string_view text(header.get(), got);
+    while (!text.empty() && count < maxHooks) {
+      const size_t eol = text.find('\n');
+      // A line cut off by the header limit could carry a truncated name.
+      if (eol == std::string_view::npos && got == luapaths::HEADER_BYTES) break;
+      std::string_view value = luapaths::headerValue(text.substr(0, eol), "permissions");
+      while (!value.empty() && count < maxHooks) {
+        const size_t sep = value.find_first_of(" ,\t");
+        const std::string_view fn = luapaths::lookupHookName(value.substr(0, sep));
+        if (!fn.empty()) {
+          LuaLookupHook& hook = hooks[count++];
+          snprintf(hook.app, sizeof(hook.app), "%s", name);
+          snprintf(hook.function, sizeof(hook.function), "%.*s", static_cast<int>(fn.size()), fn.data());
+        }
+        if (sep == std::string_view::npos) break;
+        value.remove_prefix(sep + 1);
+      }
+      if (eol == std::string_view::npos) break;
+      text.remove_prefix(eol + 1);
+    }
+  }
+  return count;
 }
 
 LuaAppListActivity::LuaAppListActivity(GfxRenderer& renderer, MappedInputManager& mappedInput)

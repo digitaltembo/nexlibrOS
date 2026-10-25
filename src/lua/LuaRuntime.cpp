@@ -436,6 +436,17 @@ std::string_view luapaths::headerValue(std::string_view line, const std::string_
   return line;
 }
 
+std::string_view luapaths::lookupHookName(std::string_view token) {
+  if (token.substr(0, LOOKUP_HOOK_PREFIX.size()) != LOOKUP_HOOK_PREFIX) return {};
+  token.remove_prefix(LOOKUP_HOOK_PREFIX.size());
+  if (token.empty() || token.size() > MAX_HOOK_NAME || (token.front() >= '0' && token.front() <= '9')) return {};
+  for (const char c : token) {
+    const bool ok = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_';
+    if (!ok) return {};
+  }
+  return token;
+}
+
 LuaRuntime::~LuaRuntime() { close(); }
 
 void LuaRuntime::checkPath(lua_State* L, const int idx, char* out, const size_t outLen, const bool write) {
@@ -473,6 +484,12 @@ bool LuaRuntime::granted(const char* path, const bool write) const {
 
 bool LuaRuntime::addGrant(std::string_view token, char* err, const size_t errLen) {
   const std::string_view original = token;
+  // Lookup hooks grant no file access; the reader discovers them itself.
+  if (token.substr(0, luapaths::LOOKUP_HOOK_PREFIX.size()) == luapaths::LOOKUP_HOOK_PREFIX) {
+    if (!luapaths::lookupHookName(token).empty()) return true;
+    snprintf(err, errLen, "invalid lookup hook '%.*s'", static_cast<int>(original.size()), original.data());
+    return false;
+  }
   bool write;
   if (token.substr(0, 5) == "read:") {
     write = false;

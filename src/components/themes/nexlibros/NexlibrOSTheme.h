@@ -5,18 +5,18 @@
 class GfxRenderer;
 
 // Forked from Lyra Extended: identical styling off the home screen.
-namespace NolanMetrics {
+namespace NexlibrOSMetrics {
 constexpr ThemeMetrics values = [] {
   ThemeMetrics v = Lyra3CoversMetrics::values;
   v.homeRecentBooksCount = CardHomeLayout::MAX_CARDS;
   return v;
 }();
-}  // namespace NolanMetrics
+}  // namespace NexlibrOSMetrics
 
 // Home: the most recent book as a large card (cover, bold title, author,
 // progress ring), the next books as smaller cards, and an icon bar with
 // Settings, File Transfer, Apps and Library.
-class NolanTheme : public LyraTheme {
+class NexlibrOSTheme : public LyraTheme {
  public:
   bool hasCardHome() const override { return true; }
   CardHomeLayout cardHomeLayout(const GfxRenderer& renderer) const override;

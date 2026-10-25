@@ -3,9 +3,20 @@
 #include <vector>
 
 #include "activities/UiListActivity.h"
+#include "lua/LuaRuntime.h"
 
 // True when /apps holds at least one app directory with an index.lua.
 bool anyLuaAppInstalled();
+
+// A "lookupHook:<fn>" permission of an installed app.
+struct LuaLookupHook {
+  char app[luapaths::MAX_APP_NAME + 1];  // app directory name
+  char function[luapaths::MAX_HOOK_NAME + 1];
+};
+
+// Fills hooks with up to maxHooks lookup hooks declared by installed apps, in
+// directory order; returns how many were found.
+size_t findLuaLookupHooks(LuaLookupHook* hooks, size_t maxHooks);
 
 // Lists the Lua apps in /apps (one directory per app, entry script index.lua)
 // and launches the selected one in LuaAppActivity. Row titles come from an

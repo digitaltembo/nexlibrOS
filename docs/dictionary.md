@@ -51,7 +51,13 @@ One word on the page becomes highlighted:
 2. Press **Confirm** to look up the highlighted word.
 3. Press **Back** to return to the reader.
 
-On touch devices (X4 Pro and other touchscreen readers), long-press a word on the reading page to enter lookup mode with that word highlighted and a **Look Up** bubble above it. Tap the bubble or the highlight to show its definition, tap another word to move the highlight there, or tap away from the text to return to the reader. While **Settings → Controls → Long-Press Word to Look Up** is on (the default), this replaces **Look Up** in the reader menu; turn it off to get the menu entry back and keep long-presses for page-turn behavior.
+On touch devices (X4 Pro and other touchscreen readers), long-press a word on the reading page to select it. A bubble above the word offers:
+
+- **Look Up** — show its definition (only when a dictionary is selected). Tapping the selected word does the same.
+- **Highlight** — start a highlight at this word. Tap further words to extend it, then tap **Done** (or the last word again) to save it. On a word that is already highlighted, this becomes **Remove Highlight**. Highlights are saved per book in `/.crosspoint/highlights/` and drawn with a gray background.
+- **Go to** — follow the link the word belongs to (only on linked words).
+
+Tap another word to move the selection there, or tap away from the text to return to the reader. While **Settings → Controls → Long-Press Word to Look Up** is on (the default), this replaces **Look Up** and **Highlight** in the reader menu. Turn it off to get those menu entries back and leave long-presses to page-turn behavior.
 
 On the very first lookup with a dictionary (and again whenever the `.idx` or `.syn` source file changes), the reader shows *"Indexing dictionary…"* while it builds small sidecar files next to them — a `.qidx` for the word index, and a `.sidx` when a `.syn` synonym file is present. Each sidecar is rebuilt independently, only when its own source changes. This takes a few seconds for large dictionaries and makes all subsequent lookups fast. The sidecars can be deleted safely at any time — they will simply be rebuilt.
 

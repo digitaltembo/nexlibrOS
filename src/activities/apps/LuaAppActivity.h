@@ -23,7 +23,11 @@
 // frame drew with gfx.photo are then redrawn into the two grayscale planes.
 class LuaAppActivity final : public Activity {
  public:
-  LuaAppActivity(GfxRenderer& renderer, MappedInputManager& mappedInput, std::string scriptPath, std::string appName);
+  // A non-empty hookFunction names a global the app's script defines (see
+  // luapaths::LOOKUP_HOOK_PREFIX); it is called with hookWord once the
+  // script's top level has run, before the first draw().
+  LuaAppActivity(GfxRenderer& renderer, MappedInputManager& mappedInput, std::string scriptPath, std::string appName,
+                 std::string hookFunction = {}, std::string hookWord = {});
 
   void onEnter() override;
   void onExit() override;
@@ -83,6 +87,8 @@ class LuaAppActivity final : public Activity {
 
   std::string scriptPath;
   std::string appName;
+  std::string hookFunction;
+  std::string hookWord;
 
   LuaRuntime runtime;
   TaskHandle_t task = nullptr;

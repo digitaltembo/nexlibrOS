@@ -2,6 +2,7 @@
 
 #include <FontCacheManager.h>
 #include <GfxRenderer.h>
+#include <Logging.h>
 #include <Memory.h>
 
 #include <algorithm>
@@ -13,6 +14,7 @@
 #include "CrossPointSettings.h"
 #include "DictionaryDefinitionActivity.h"
 #include "HighlightMarks.h"
+#include "activities/apps/LuaAppActivity.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
 #include "util/DictionaryRegistry.h"
@@ -53,6 +55,36 @@ bool isSelectableToken(const char* text) {
   return false;
 }
 
+// Length of the UTF-8 punctuation at the start of text: ASCII punctuation or
+// General Punctuation (quotes, dashes, ellipsis).
+size_t punctuationAt(const char* text, const size_t len) {
+  const auto c = static_cast<uint8_t>(text[0]);
+  if (c < 0x80) return std::ispunct(c) ? 1 : 0;
+  return len >= 3 && c == 0xE2 && (static_cast<uint8_t>(text[1]) & 0xFE) == 0x80 ? 3 : 0;
+}
+
+// The word as a lookup hook receives it, without surrounding punctuation.
+std::string hookWord(const char* text) {
+  size_t start = 0;
+  size_t end = strlen(text);
+  while (start < end) {
+    const size_t n = punctuationAt(text + start, end - start);
+    if (n == 0) break;
+    start += n;
+  }
+  while (end > start) {
+    size_t n = 0;
+    if (static_cast<uint8_t>(text[end - 1]) < 0x80) {
+      n = punctuationAt(text + end - 1, 1);
+    } else if (end - start >= 3) {
+      n = punctuationAt(text + end - 3, 3);
+    }
+    if (n == 0) break;
+    end -= n;
+  }
+  return std::string(text + start, end - start);
+}
+
 }  // namespace
 
 void DictionaryWordSelectActivity::onEnter() {
@@ -61,6 +93,8 @@ void DictionaryWordSelectActivity::onEnter() {
   // fast path (drawHighlightWithSnapshot skips the read), keeping the
   // full-repaint path as the fallback.
   snapshot = makeUniqueNoThrow<uint8_t[]>(SNAPSHOT_CAPACITY);
+  // Only the touch bubble offers lookup hooks.
+  if (showBubble) lookupHookCount = static_cast<uint8_t>(findLuaLookupHooks(lookupHooks, MAX_LOOKUP_HOOKS));
   prepareWords();
   // Start on the middle row's word nearest mid-screen instead of top-left:
   // any word on the page is then at most half a page of moves away.
@@ -295,6 +329,25 @@ void DictionaryWordSelectActivity::runAction(const StrId action) {
   }
 }
 
+void DictionaryWordSelectActivity::runLookupHook(const int index) {
+  if (index < 0 || index >= lookupHookCount) return;
+  const LuaLookupHook& hook = lookupHooks[index];
+  char path[luapaths::MAX_PATH];
+  snprintf(path, sizeof(path), "%s/%s/%s", luapaths::APPS_DIR, hook.app, luapaths::ENTRY_FILE);
+  auto activity = makeUniqueNoThrow<LuaAppActivity>(renderer, mappedInput, std::string(path), std::string(hook.app),
+                                                    std::string(hook.function), hookWord(words[selected].text));
+  if (!activity) {
+    LOG_ERR("DWS", "OOM: lookup hook app activity");
+    return;
+  }
+  // The app repaints the whole screen, so the snapshot is stale on return
+  // anyway; release it for the app's heap.
+  snapshot.reset();
+  snapshotIdx = -1;
+  // Back from the app returns straight to the reader.
+  startActivityForResult(std::move(activity), [](const ActivityResult&) { finish(); });
+}
+
 void DictionaryWordSelectActivity::saveRange() {
   const int lo = std::min(anchor, selected);
   const int hi = std::max(anchor, selected);
@@ -378,7 +431,7 @@ void DictionaryWordSelectActivity::loop() {
     // The bubble overlaps the neighbouring line, so it takes the tap first.
     const int segment = bubbleHit(tx, ty);
     if (segment >= 0) {
-      runAction(lookupBubble().labels[segment]);
+      runBubbleSegment(segment);
       return;
     }
     const int hit = wordAt(tx, ty);
@@ -516,24 +569,37 @@ DictionaryWordSelectActivity::Bubble DictionaryWordSelectActivity::lookupBubble(
 
   Bubble bubble;
   bubble.labelCount = 0;
+  const auto addLabel = [&bubble](const StrId label) {
+    bubble.hooks[bubble.labelCount] = -1;
+    bubble.labels[bubble.labelCount++] = label;
+  };
   const StrId primary = primaryAction();
   if (primary == StrId::STR_LOOKUP) {
     // Lookup mode offers highlighting alongside.
-    bubble.labels[bubble.labelCount++] = StrId::STR_LOOKUP;
-    bubble.labels[bubble.labelCount++] =
-        highlightAt(selected) >= 0 ? StrId::STR_REMOVE_HIGHLIGHT : StrId::STR_HIGHLIGHT;
+    addLabel(StrId::STR_LOOKUP);
+    addLabel(highlightAt(selected) >= 0 ? StrId::STR_REMOVE_HIGHLIGHT : StrId::STR_HIGHLIGHT);
   } else {
-    bubble.labels[bubble.labelCount++] = primary;
+    addLabel(primary);
   }
   // A linked word can be followed from here, so links under the bookmark
   // corner's tap target stay reachable.
-  if (anchor < 0 && linkAt(selected)) bubble.labels[bubble.labelCount++] = StrId::STR_GO_TO;
+  if (anchor < 0 && linkAt(selected)) addLabel(StrId::STR_GO_TO);
 
   // Segment offsets are relative until bubble.x is known below.
   bubble.width = 0;
   for (int i = 0; i < bubble.labelCount; i++) {
     bubble.segmentX[i] = bubble.width;
-    bubble.width += renderer.getTextWidth(BUBBLE_FONT_ID, I18N.get(bubble.labels[i])) + 2 * BUBBLE_PAD_X;
+    bubble.width += renderer.getTextWidth(BUBBLE_FONT_ID, bubbleLabel(bubble, i)) + 2 * BUBBLE_PAD_X;
+  }
+  // Lookup hooks follow while they fit across the screen.
+  const int maxWidth = renderer.getScreenWidth() - left - right;
+  for (int h = 0; anchor < 0 && h < lookupHookCount; h++) {
+    const int segmentWidth = renderer.getTextWidth(BUBBLE_FONT_ID, lookupHooks[h].function) + 2 * BUBBLE_PAD_X;
+    if (bubble.width + segmentWidth > maxWidth) break;
+    bubble.labels[bubble.labelCount] = StrId::STR_LOOKUP;
+    bubble.hooks[bubble.labelCount] = static_cast<int8_t>(h);
+    bubble.segmentX[bubble.labelCount++] = bubble.width;
+    bubble.width += segmentWidth;
   }
   bubble.height = renderer.getLineHeight(BUBBLE_FONT_ID) + 2 * BUBBLE_PAD_Y;
 
@@ -570,6 +636,20 @@ int DictionaryWordSelectActivity::bubbleHit(const int x, const int y) const {
   return segment;
 }
 
+const char* DictionaryWordSelectActivity::bubbleLabel(const Bubble& bubble, const int segment) const {
+  const int hook = bubble.hooks[segment];
+  return hook >= 0 ? lookupHooks[hook].function : I18N.get(bubble.labels[segment]);
+}
+
+void DictionaryWordSelectActivity::runBubbleSegment(const int segment) {
+  const Bubble bubble = lookupBubble();
+  if (bubble.hooks[segment] >= 0) {
+    runLookupHook(bubble.hooks[segment]);
+  } else {
+    runAction(bubble.labels[segment]);
+  }
+}
+
 void DictionaryWordSelectActivity::drawBubble(const Bubble& bubble) const {
   renderer.fillRoundedRect(bubble.x, bubble.y, bubble.width, bubble.height, BUBBLE_RADIUS, Color::Black);
 
@@ -584,7 +664,7 @@ void DictionaryWordSelectActivity::drawBubble(const Bubble& bubble) const {
     if (i > 0) {
       renderer.drawLine(segX, bubble.y + BUBBLE_PAD_Y, segX, bubble.y + bubble.height - BUBBLE_PAD_Y, false);
     }
-    renderer.drawText(BUBBLE_FONT_ID, segX + BUBBLE_PAD_X, bubble.y + BUBBLE_PAD_Y, I18N.get(bubble.labels[i]), false);
+    renderer.drawText(BUBBLE_FONT_ID, segX + BUBBLE_PAD_X, bubble.y + BUBBLE_PAD_Y, bubbleLabel(bubble, i), false);
   }
 }
 

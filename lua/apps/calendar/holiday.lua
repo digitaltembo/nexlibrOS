@@ -1,9 +1,12 @@
--- Holidays for the calendar app, computed from rules for a fixed range of
--- years. Day numbers count days since 1970-01-01.
+-- Holidays for the calendar app, computed from rules, plus recurring personal
+-- dates read from a file. Day numbers count days since 1970-01-01.
 --
 --   local holiday = require("holiday")
 --   holiday.init({ to_days = ..., from_days = ..., weekday = ..., days_in_month = ... })
+--   holiday.load("dates.txt")
 --   holiday.on(z) -- { name, ... } or nil
+
+local lines = require("lines")
 
 local holiday = {}
 
@@ -14,10 +17,25 @@ function holiday.init(dates)
   to_days, from_days, weekday, days_in_month = dates.to_days, dates.from_days, dates.weekday, dates.days_in_month
 end
 
--- Holidays are computed for these years only.
-local HOLIDAY_FIRST_YEAR, HOLIDAY_LAST_YEAR = 2026, 2036
-
 local holiday_year, holiday_days = nil, nil -- the year last computed: day number -> { name, ... }
+local recurring = {} -- month * 100 + day -> { { name = ..., year = ... | nil }, ... }
+
+-- Reads recurring dates, one per line: "MM-DD Name" repeats every year;
+-- "YYYY-MM-DD Name" repeats from YYYY and shows the count of years, e.g.
+-- "Sam's birthday (30)". Other lines (such as "# comments") are ignored.
+function holiday.load(path)
+  recurring, holiday_year = {}, nil
+  lines.each(path, function(line)
+    local y, m, d, name = line:match("^%s*(%d%d%d%d)-(%d%d?)-(%d%d?)%s+(.-)%s*$")
+    if not y then m, d, name = line:match("^%s*(%d%d?)-(%d%d?)%s+(.-)%s*$") end
+    m, d = tonumber(m), tonumber(d)
+    if not m or m < 1 or m > 12 or d < 1 or d > days_in_month(2000, m) or name == "" then return end
+    local key = m * 100 + d
+    local list = recurring[key] or {}
+    list[#list + 1] = { name = name, year = tonumber(y) }
+    recurring[key] = list
+  end)
+end
 
 local function nth_weekday(y, m, wd, n)
   if n < 0 then
@@ -69,9 +87,22 @@ local function hebrew_new_year(hy)
   return ny1 + correction - 2092590 -- Hebrew epoch relative to 1970-01-01
 end
 
-local function year_holidays(y, days)
-  if y < HOLIDAY_FIRST_YEAR or y > HOLIDAY_LAST_YEAR then return end
+-- 29 February dates fall on the 28th in other years.
+local function year_recurring(y, days)
+  for key, list in pairs(recurring) do
+    local m = key // 100
+    local z = to_days(y, m, math.min(key % 100, days_in_month(y, m)))
+    for _, r in ipairs(list) do
+      if not r.year or y == r.year then
+        add_holiday(days, z, r.name)
+      elseif y > r.year then
+        add_holiday(days, z, r.name .. " (" .. (y - r.year) .. ")")
+      end
+    end
+  end
+end
 
+local function year_holidays(y, days)
   -- US federal (5 U.S.C. 6103).
   add_us_fixed(days, y, 1, 1, "New Year's Day")
   add_holiday(days, nth_weekday(y, 1, 1, 3), "Martin Luther King Jr. Day")
@@ -122,6 +153,7 @@ function holiday.on(z)
   local y = from_days(z)
   if holiday_year ~= y then
     holiday_year, holiday_days = y, {}
+    year_recurring(y, holiday_days) -- listed before the holidays on the same day
     for year = y - 1, y + 1 do year_holidays(year, holiday_days) end
   end
   return holiday_days[z]

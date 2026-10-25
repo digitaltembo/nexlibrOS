@@ -1,7 +1,12 @@
 -- title: Calendar
 --
--- US, Canadian, Christian and Jewish holidays (2026-2036) are shown in bold
--- above a day's notes.
+-- US, Canadian, Christian and Jewish holidays are shown in bold
+-- above a day's notes, after any recurring dates (birthdays, anniversaries)
+-- listed in the app's dates.txt, one per line:
+--   03-14 Pi Day                  every year
+--   1996-07-02 Sam's birthday     every year from 1996, as "Sam's birthday (30)"
+-- A 29 February date falls on the 28th in other years. dates.txt is read when
+-- the app starts.
 --
 -- Notes are kept one file per month in the app's notes/ folder,
 -- <yyyy>-<mm>.txt, one note per line: <day><TAB><text>.
@@ -15,6 +20,7 @@
 local listview = require("listview")
 
 local NOTES_DIR = "notes"
+local DATES_FILE = "dates.txt"
 local MARGIN = 16
 local MAX_NOTE = 200
 local WEEK_START = 0 -- 0 = Sunday, 1 = Monday
@@ -106,6 +112,7 @@ end
 
 local holiday = require("holiday")
 holiday.init({ to_days = to_days, from_days = from_days, weekday = weekday, days_in_month = days_in_month })
+holiday.load(DATES_FILE)
 
 -- Notes ------------------------------------------------------------------------
 

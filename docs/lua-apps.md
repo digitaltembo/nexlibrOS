@@ -44,12 +44,13 @@ same header:
 ```
 
 Entries are separated by spaces or commas; there may be several
-`permissions` lines and at most 8 entries in all.
+`permissions` lines and at most 8 `read`/`write` entries in all.
 
 | Entry | Grants |
 |---|---|
 | `read:<dir>` | `fs` reads (and `dict` lookups) anywhere under the absolute directory `<dir>`. |
 | `write:<dir>` | Reads and writes under `<dir>`. May not include `/apps` or lie inside it. |
+| `lookupHook:<fn>` | Adds `<fn>` to the bubble that opens when a word is long-pressed in the reader. See [Lookup hooks](#lookup-hooks). |
 
 A malformed entry stops the app from starting, with the reason on the error
 screen. Permissions are read once, when the app starts. Because they live in
@@ -60,6 +61,28 @@ Paths are compared the way the SD card resolves them: repeated `/` collapse,
 and leading spaces and trailing dots and spaces of each segment are dropped
 (`"index.lua."` names `index.lua`). A segment that is empty after trimming
 (`"..."`) is rejected.
+
+### Lookup hooks
+
+On touch devices, long-pressing a word in the reader opens a bubble with Look
+Up, Highlight and, on a link, Go to. Each `lookupHook:<fn>` entry adds a
+segment labelled `<fn>` after those (the first two hooks found under `/apps`,
+as long as the bubble still fits the screen). Choosing it starts the app,
+runs the script's top level as usual, then calls the global function `<fn>`
+with the word, stripped of surrounding punctuation, before the first `draw()`.
+Leaving the app returns to the book.
+
+```lua
+-- permissions: lookupHook:wiki
+
+function wiki(word)
+  search(word)
+end
+```
+
+`<fn>` must be a Lua identifier of at most 24 characters. If the script does
+not define it as a global function, the app shows an error. Hooks are not
+offered while a highlight is being extended.
 
 ## Lifecycle
 

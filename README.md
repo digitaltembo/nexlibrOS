@@ -30,6 +30,6 @@ Specifically I've added
 * Long tap a word in reader mode to define or add highlights
 * Show bookmarks in the corner of the page
 * Tab select between different dictionaries
-* Simplified 'Nolan' theme, highlighting recent books with small icon menu for settings, file management, and opening the library
+* Simplified 'nexlibrOS' theme (default on the X4 Pro), highlighting recent books with small icon menu for settings, file management, and opening the library
 
 This satisfies my immediate wants out of CrossPoint, although I may still explore. Ideally I keep adding features as I think of them, and try to merge upstream where it seems available

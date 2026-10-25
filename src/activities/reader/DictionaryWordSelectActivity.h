@@ -9,6 +9,7 @@
 #include <vector>
 
 #include "activities/Activity.h"
+#include "activities/apps/LuaAppListActivity.h"
 #include "util/DictionaryLookup.h"
 #include "util/HighlightFile.h"
 
@@ -20,7 +21,8 @@
 // highlight under the cursor), moving extends it, and Confirm again saves it.
 //
 // On touch devices a tap on another word moves the cursor and the bubble over
-// it offers Look Up and Highlight (or Remove Highlight). While a highlight is
+// it offers Look Up and Highlight (or Remove Highlight), then the lookup hooks
+// of installed Lua apps, which open the app on the word. While a highlight is
 // being extended, taps on words move its end, the bubble's Done (or a tap on
 // the end word) saves it, and a tap away from any word returns to the reader.
 class DictionaryWordSelectActivity final : public Activity {
@@ -72,12 +74,14 @@ class DictionaryWordSelectActivity final : public Activity {
 
   enum class Popup : uint8_t { None, Busy, NotFound, Error };
 
-  static constexpr int MAX_BUBBLE_LABELS = 3;
+  static constexpr int MAX_LOOKUP_HOOKS = 2;
+  static constexpr int MAX_BUBBLE_LABELS = 3 + MAX_LOOKUP_HOOKS;
 
   // Tappable callout above the cursor word (or selection), or below it when it
   // sits too close to the top of the screen. pointerX is the tip of the arrow,
   // over the word's center. Segment i starts at segmentX[i] and ends where the
-  // next one starts, the last at the bubble's right edge.
+  // next one starts, the last at the bubble's right edge. A segment with
+  // hooks[i] >= 0 runs lookupHooks[hooks[i]] instead of labels[i].
   struct Bubble {
     int x;
     int y;
@@ -87,6 +91,7 @@ class DictionaryWordSelectActivity final : public Activity {
     bool below;
     uint8_t labelCount;
     StrId labels[MAX_BUBBLE_LABELS];
+    int8_t hooks[MAX_BUBBLE_LABELS];
     int segmentX[MAX_BUBBLE_LABELS];
   };
 
@@ -109,6 +114,8 @@ class DictionaryWordSelectActivity final : public Activity {
   void drawSelection(int lo, int hi) const;
   Bubble lookupBubble() const;
   int bubbleHit(int x, int y) const;
+  const char* bubbleLabel(const Bubble& bubble, int segment) const;
+  void runBubbleSegment(int segment);
   void drawBubble(const Bubble& bubble) const;
   void drawHints() const;
 
@@ -119,6 +126,8 @@ class DictionaryWordSelectActivity final : public Activity {
   // The action Confirm (or a tap on the cursor word) performs right now.
   StrId primaryAction() const;
   void runAction(StrId action);
+  // Opens the hook's app with the selected word.
+  void runLookupHook(int index);
   void saveRange();
   void removeHighlight(int index);
 
@@ -143,6 +152,8 @@ class DictionaryWordSelectActivity final : public Activity {
   bool preselected = false;
   // Touch boards show a tappable bubble over the cursor.
   const bool showBubble = BoardConfig::hasTouch();
+  LuaLookupHook lookupHooks[MAX_LOOKUP_HOOKS] = {};
+  uint8_t lookupHookCount = 0;
   uint16_t rowCount = 0;
   unsigned long lastHorizontalMoveTime = 0;
 

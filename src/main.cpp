@@ -510,6 +510,11 @@ void setup() {
   if (gpio.hasTouch()) {
     SETTINGS.readerMenuStyle = CrossPointSettings::READER_MENU_TOOLBAR;
   }
+  // nexlibrOS is the default where it is offered; other boards keep Lyra, since
+  // the option index would be out of range in their theme list.
+  if (UITheme::supportsNexlibrOS()) {
+    SETTINGS.uiTheme = CrossPointSettings::NEXLIBROS;
+  }
   SETTINGS.loadFromFile();
   // Push the saved timezone's POSIX rule into the clock (migrating the legacy
   // UTC-offset setting on first boot after the update).

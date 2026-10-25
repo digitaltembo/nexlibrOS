@@ -1,5 +1,6 @@
 -- title: Wikipedia
 -- description: Offline Wikipedia articles
+-- permissions: lookupHook:wiki
 --
 -- Reads a pack built by scripts/wikipedia/build_wiki_pack.py from the app's
 -- data/ directory (/apps/wikipedia/data on the SD card).
@@ -9,8 +10,11 @@
 -- Article: Down/Right next page, Up/Left previous page, Confirm picks a link on
 -- the page (then Left/Right/Up/Down move, Confirm follows, Back cancels).
 -- Back returns to the article a link came from, else the results (or home).
+-- Opened from the reader's word bubble, Back returns to the book instead of
+-- the home screen.
 -- Touch: tap a link to follow it, tap the right/left half (or swipe) to turn
 -- pages, tap the title to go back, long-press to search.
+-- Reader: long-press a word and choose "wiki" to search for it here.
 
 local listview = require("listview")
 local wikipack = require("wikipack")
@@ -49,6 +53,7 @@ local trail = {}    -- articles left by following a link: { id, pos (packed), ba
 -- back: earlier page positions packed as off * SUB_LIMIT + sub, one integer per page.
 local SUB_LIMIT = 1024
 local message = nil
+local from_hook = false -- opened by wiki(word) from the reader
 local header_bottom = 0
 local hints_height = 0 -- the hint bar's height, from the previous draw
 
@@ -182,11 +187,21 @@ local function header_height()
   return height + gfx.line_height() + 6
 end
 
-local function draw_header(title, subtitle, right)
+-- back draws a "<" before the title; a tap anywhere on the header goes back.
+local function draw_header(title, subtitle, right, back)
   local w = gfx.width()
   gfx.font("ui_large", "bold")
-  gfx.text(MARGIN, MARGIN, fit(title, body_width()))
-  local y = MARGIN + gfx.line_height() + 4
+  local lh = gfx.line_height()
+  local x = MARGIN
+  if back then
+    local half = lh * 3 // 10
+    local mid = MARGIN + lh // 2
+    gfx.line(x + half, mid - half, x, mid, true, 3)
+    gfx.line(x, mid, x + half, mid + half, true, 3)
+    x = x + half + 14
+  end
+  gfx.text(x, MARGIN, fit(title, body_width() - (x - MARGIN)))
+  local y = MARGIN + lh + 4
   gfx.font("ui")
   local right_w = right and gfx.text_width(right) or 0
   if right then gfx.text(w - MARGIN - right_w, y, right) end
@@ -267,6 +282,17 @@ local function search(query)
   if #hits == 1 then open_article(hits[1].id) end
 end
 
+-- Lookup hook (see the permissions header): the reader's word bubble opens
+-- the app with wiki(word). An exact title match opens straight away.
+function wiki(word)
+  if not pack then return end
+  from_hook = true
+  search(word)
+  if results and not article and results.hits[1].exact then open_article(results.hits[1].id) end
+  -- An article found for the word goes straight back to the book.
+  if article then results = nil end
+end
+
 local function prompt(initial)
   sys.keyboard("Search Wikipedia", initial or "", function(text)
     message = nil
@@ -332,7 +358,7 @@ end
 
 local function draw_article()
   local pct = article.size > 0 and math.floor(100 * article.pos.off / article.size) or 100
-  draw_header(article.title, nil, pct .. "%")
+  draw_header(article.title, nil, pct .. "%", true)
   draw_lines(article.lines, article.sel)
 end
 
@@ -424,6 +450,8 @@ local function go_back()
   else
     return false
   end
+  -- Opened from the reader: leaving for the home screen returns to the book.
+  if from_hook and not article and not results then return false end
   return true
 end
 
@@ -471,12 +499,15 @@ end
 function on_touch(x, y, kind)
   if article then
     local target = kind ~= "long" and link_at(x, y)
-    if y < header_bottom then go_back()
+    if y < header_bottom then
+      if not go_back() then return sys.exit() end
     elseif kind == "long" then prompt(results and results.query)
     elseif target then follow(target)
     else turn(x < gfx.width() // 2 and -1 or 1) end
   elseif results then
-    if y < header_bottom then go_back() else
+    if y < header_bottom then
+      if not go_back() then return sys.exit() end
+    else
       local hit, row = results.view:tap(x, y)
       if hit == "row" then open_article(results.hits[row].id) end
     end
