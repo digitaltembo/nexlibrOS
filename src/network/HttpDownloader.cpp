@@ -37,7 +37,7 @@ HttpDownloader::DownloadError runGetSecure(const std::string& url, const std::st
         // setUserAgent replaces SecureHttpClient's built-in UA; addHeader would
         // append a second User-Agent header, which strict servers reject (aiohttp
         // answers 400 "Duplicate 'User-Agent' header found").
-        http.setUserAgent("CrossPoint-ESP32-" CROSSPOINT_VERSION);
+        http.setUserAgent("nexlibrOS-ESP32-" CROSSPOINT_VERSION);
         // Credentials and caller headers stay with the starting origin; a
         // redirect elsewhere (or to plain http) gets neither.
         if (sameOrigin) {
