@@ -157,7 +157,7 @@ jobs:
           git submodule update --init --depth 1 esp32sim
 
       - name: Download the X4 Pro build
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: site-firmware
           path: .pio/build/x4pro-gh_release
@@ -181,12 +181,12 @@ jobs:
       - name: Build the site
         run: python3 scripts/build_site.py --env x4pro-gh_release --boot-app0 .pio/build/x4pro-gh_release/boot_app0.bin --out _site
 
-      - uses: actions/upload-pages-artifact@v3
+      - uses: actions/upload-pages-artifact@v5
         with:
           path: _site
 
       - id: deployment
-        uses: actions/deploy-pages@v4
+        uses: actions/deploy-pages@v5
 
   publish-release:
     needs: build-release
@@ -195,7 +195,7 @@ jobs:
       contents: write
     steps:
       - name: Download firmware assets
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           path: dist
           pattern: nexlibrOS-*.bin

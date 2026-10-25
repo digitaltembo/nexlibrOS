@@ -47,7 +47,7 @@ jobs:
             "reedsolo>=1.5.3,<1.8" "esp-idf-size>=2.0.0" "esp-coredump>=1.14.0"
 
       - name: Cache PlatformIO packages
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: ~/.platformio
           key: pio-v2-${{ runner.os }}-${{ hashFiles('platformio.ini') }}
