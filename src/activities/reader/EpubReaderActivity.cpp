@@ -32,6 +32,7 @@
 #include "EpubReaderFootnoteSelectActivity.h"
 #include "EpubReaderHighlightsActivity.h"
 #include "EpubReaderPercentSelectionActivity.h"
+#include "EpubReaderSearchActivity.h"
 #include "EpubReaderUtils.h"
 #include "HighlightMarks.h"
 #include "KOReaderCredentialStore.h"
@@ -48,6 +49,7 @@
 #include "SilentRestart.h"
 #include "activities/network/WifiSelectionActivity.h"
 #include "activities/settings/TextSettingsActivity.h"
+#include "activities/util/KeyboardEntryActivity.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
 #include "util/BookmarkUtil.h"
@@ -1084,6 +1086,38 @@ void EpubReaderActivity::onReaderMenuConfirm(EpubReaderMenuActivity::MenuAction 
             HighlightFile::load(epub->getPath(), cachedHighlights);
             progressChangeResultHandler(result);
           });
+      break;
+    }
+    case EpubReaderMenuActivity::MenuAction::SEARCH: {
+      auto keyboard = makeUniqueNoThrow<KeyboardEntryActivity>(renderer, mappedInput, tr(STR_SEARCH), "",
+                                                               BookTextSearch::MAX_TERM_CODEPOINTS, InputType::Text);
+      if (!keyboard) {
+        LOG_ERR("ERS", "OOM: search keyboard");
+        break;
+      }
+      startActivityForResult(std::move(keyboard), [this, progressChangeResultHandler](const ActivityResult& result) {
+        if (result.isCancelled) {
+          openReaderMenu();
+          return;
+        }
+        const std::string term = std::get<KeyboardResult>(result.data).text;
+        // Number results from the live chapter, then release it: the search
+        // inflates and parses chapters of its own (mirrors SELECT_CHAPTER).
+        const ChapterPosition position = chapterPosition();
+        {
+          RenderLock lock;
+          if (section) {
+            rememberCurrentContentOffset();
+            cachedSpineIndex = currentSpineIndex;
+            cachedChapterTotalPageCount = section->pageCount;
+            nextPageNumber = section->currentPage;
+          }
+          section.reset();
+        }
+        startActivityForResult(std::make_unique<EpubReaderSearchActivity>(renderer, mappedInput, epub, term, bookPages,
+                                                                          currentSpineIndex, position.totalPages),
+                               progressChangeResultHandler);
+      });
       break;
     }
     case EpubReaderMenuActivity::MenuAction::TOGGLE_BOOKMARK: {
@@ -2701,12 +2735,13 @@ void EpubReaderActivity::buildMoreActions() {
   if (compactToolbar()) {
     // Navigation only; display toggles live in the control center.
     moreItems.clear();
-    moreItems.reserve(5);
+    moreItems.reserve(6);
     moreItems.push_back({MA::TOGGLE_BOOKMARK, StrId::STR_TOGGLE_BOOKMARK});
     moreItems.push_back({MA::GO_TO_PAGE, StrId::STR_GO_TO_PAGE});
     moreItems.push_back({MA::GO_TO_PERCENT, StrId::STR_GO_TO_PERCENT});
     moreItems.push_back({MA::BOOKMARKS, StrId::STR_BOOKMARKS});
     moreItems.push_back({MA::HIGHLIGHTS, StrId::STR_HIGHLIGHTS});
+    moreItems.push_back({MA::SEARCH, StrId::STR_SEARCH});
     return;
   }
   EpubReaderMenuActivity::buildMenuItems(moreItems, !currentPageFootnotes.empty(), !cachedBookmarks.empty());

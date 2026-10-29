@@ -67,6 +67,19 @@ bool BookPageEstimate::position(const Epub& epub, const int spineIndex, const in
   return total > 0;
 }
 
+int BookPageEstimate::pageAt(const Epub& epub, const int spine, const float chapterFraction, const int spineIndex,
+                             const int chapterPages) const {
+  const int spineCount = epub.getSpineItemsCount();
+  if (spine < 0 || spine >= spineCount) return 0;
+  const float ratio = pagesPerByte(epub, spineIndex, chapterPages);
+  if (ratio <= 0.0f) return 0;
+  int before = 0;
+  for (int i = 0; i < spine; ++i) before += chapterPageCount(epub, i, ratio, spineIndex, chapterPages);
+  const int pages = chapterPageCount(epub, spine, ratio, spineIndex, chapterPages);
+  const int index = std::clamp(static_cast<int>(chapterFraction * static_cast<float>(pages)), 0, pages - 1);
+  return before + index + 1;
+}
+
 bool BookPageEstimate::locate(const Epub& epub, const int spineIndex, const int chapterPages, const int page,
                               int& targetSpine, float& chapterFraction) const {
   const int spineCount = epub.getSpineItemsCount();

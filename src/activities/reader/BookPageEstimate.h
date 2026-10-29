@@ -21,6 +21,11 @@ class BookPageEstimate {
   // enough text has been laid out to scale the rest of the book from.
   bool position(const Epub& epub, int spineIndex, int pageIndex, int chapterPages, int& page, int& total) const;
 
+  // 1-based book page at `chapterFraction` through `spine`, with the current
+  // chapter (`spineIndex`, `chapterPages`) counted as in position(); 0 when
+  // there is not enough laid out to estimate from.
+  int pageAt(const Epub& epub, int spine, float chapterFraction, int spineIndex, int chapterPages) const;
+
   // Inverse of position(): the chapter holding 1-based book `page` and the
   // fraction through that chapter where it starts (centred on the page, so a
   // re-paginated chapter still lands on it).

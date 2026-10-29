@@ -31,7 +31,8 @@ class EpubReaderMenuActivity final : public UiListActivity {
     HIGHLIGHT,
     // Compact toolbar More panel only (see BaseTheme::compactReaderToolbar).
     GO_TO_PAGE,
-    HIGHLIGHTS
+    HIGHLIGHTS,
+    SEARCH
   };
 
   struct MenuItem {
