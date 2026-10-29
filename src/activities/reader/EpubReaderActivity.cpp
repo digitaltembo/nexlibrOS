@@ -30,6 +30,7 @@
 #include "EpubReaderBookmarksActivity.h"
 #include "EpubReaderChapterSelectionActivity.h"
 #include "EpubReaderFootnoteSelectActivity.h"
+#include "EpubReaderHighlightsActivity.h"
 #include "EpubReaderPercentSelectionActivity.h"
 #include "EpubReaderUtils.h"
 #include "HighlightMarks.h"
@@ -790,6 +791,35 @@ void EpubReaderActivity::loop() {
   requestUpdate();
 }
 
+bool EpubReaderActivity::bookPagePosition(int& page, int& total) const {
+  if (!epub) return false;
+  const ChapterPosition position = chapterPosition();
+  return bookPages.position(*epub, currentSpineIndex, position.pageIndex, position.totalPages, page, total);
+}
+
+void EpubReaderActivity::jumpToBookPage(const int page) {
+  if (!epub) return;
+  const ChapterPosition position = chapterPosition();
+  int targetSpine = 0;
+  float chapterFraction = 0.0f;
+  if (!bookPages.locate(*epub, currentSpineIndex, position.totalPages, page, targetSpine, chapterFraction)) return;
+  {
+    RenderLock lock;
+    clearDeferredReposition();
+    if (section && targetSpine == currentSpineIndex && section->pageCount > 0) {
+      section->currentPage =
+          std::min(static_cast<int>(chapterFraction * static_cast<float>(section->pageCount)), section->pageCount - 1);
+    } else {
+      currentSpineIndex = targetSpine;
+      nextPageNumber = 0;
+      pendingSpineProgress = chapterFraction;
+      pendingPercentJump = true;
+      section.reset();
+    }
+  }
+  requestUpdate();
+}
+
 void EpubReaderActivity::jumpToPercent(int percent) {
   if (!epub) return;
   const size_t bookSize = epub->getBookSize();
@@ -968,6 +998,24 @@ void EpubReaderActivity::onReaderMenuConfirm(EpubReaderMenuActivity::MenuAction 
           });
       break;
     }
+    case EpubReaderMenuActivity::MenuAction::GO_TO_PAGE: {
+      int page = 0;
+      int total = 0;
+      if (!bookPagePosition(page, total)) {
+        // Too little of the book laid out to number its pages yet.
+        onReaderMenuConfirm(EpubReaderMenuActivity::MenuAction::GO_TO_PERCENT);
+        break;
+      }
+      startActivityForResult(std::make_unique<EpubReaderPercentSelectionActivity>(renderer, mappedInput, page, total),
+                             [this](const ActivityResult& result) {
+                               if (result.isCancelled) {
+                                 openReaderMenu();
+                               } else {
+                                 jumpToBookPage(static_cast<int>(std::get<PageResult>(result.data).page));
+                               }
+                             });
+      break;
+    }
     case EpubReaderMenuActivity::MenuAction::DICTIONARY: {
       openDictionaryWordSelect();
       break;
@@ -1026,6 +1074,16 @@ void EpubReaderActivity::onReaderMenuConfirm(EpubReaderMenuActivity::MenuAction 
       startActivityForResult(
           std::make_unique<EpubReaderBookmarksActivity>(renderer, mappedInput, epub, epub->getPath()),
           progressChangeResultHandler);
+      break;
+    }
+    case EpubReaderMenuActivity::MenuAction::HIGHLIGHTS: {
+      startActivityForResult(
+          std::make_unique<EpubReaderHighlightsActivity>(renderer, mappedInput, epub, epub->getPath()),
+          [this, progressChangeResultHandler](const ActivityResult& result) {
+            // The list can delete highlights.
+            HighlightFile::load(epub->getPath(), cachedHighlights);
+            progressChangeResultHandler(result);
+          });
       break;
     }
     case EpubReaderMenuActivity::MenuAction::TOGGLE_BOOKMARK: {
@@ -1640,6 +1698,11 @@ void EpubReaderActivity::renderBook() {
     GUI.drawPopup(renderer, tr(STR_DICT_NO_DICT_SET));
   }
 
+  // A finished layout gives this chapter's exact page count.
+  if (section && !section->isBuilding() && !section->isPartial()) {
+    bookPages.record(*epub, currentSpineIndex, section->pageCount);
+  }
+
   // Toolbar menu: overlay the toolbar / panel on top of the freshly rendered page.
   if (overlay != Overlay::None && usesToolbarMenu()) {
     // The page just re-rendered under the overlay: refresh the snapshot that
@@ -2029,6 +2092,8 @@ bool EpubReaderActivity::usesToolbarMenu() const {
   return SETTINGS.readerMenuStyle == CrossPointSettings::READER_MENU_TOOLBAR;
 }
 
+bool EpubReaderActivity::compactToolbar() const { return GUI.compactReaderToolbar(); }
+
 std::string EpubReaderActivity::currentChapterTitle() const {
   if (!epub) return "";
   const int tocIndex = epub->getTocIndexForSpineIndex(currentSpineIndex);
@@ -2242,6 +2307,24 @@ void EpubReaderActivity::renderOverlay() {
   // Strings the model points at live here until render() returns.
   std::string chapterTitle, pageInfo;
 
+  if (overlay == Overlay::Toolbar && compactToolbar()) {
+    // Whole-book page / total; the book percent until enough is laid out.
+    chapterTitle = epub->getTitle();  // the top bar's title
+    int page = 0;
+    int total = 0;
+    if (bookPagePosition(page, total)) {
+      pageInfo = std::to_string(page) + " / " + std::to_string(total);
+    } else {
+      pageInfo = std::to_string(bookPercentFor(chapterPosition())) + "%";
+    }
+    model.compact = true;
+    model.bookTitle = chapterTitle.c_str();
+    model.pageInfo = pageInfo.c_str();
+    toolbarUi->setModel(model);
+    toolbarUi->render();
+    return;
+  }
+
   if (overlay == Overlay::Toolbar) {
     chapterTitle = currentChapterTitle();
     const int pageCount = section->estimatedTotalPages();
@@ -2260,6 +2343,7 @@ void EpubReaderActivity::renderOverlay() {
 
   // Panels (Contents / Text / More): a bottom sheet over the page.
   model.panel = true;
+  model.compact = compactToolbar();  // matching tool row height
   if (!mappedInput.hasTouch()) {
     model.denseRows = true;
   }
@@ -2614,6 +2698,17 @@ void EpubReaderActivity::applyReaderTextSettings() {
 // two entries that have their own tool (chapters -> Contents, text -> Text).
 void EpubReaderActivity::buildMoreActions() {
   using MA = EpubReaderMenuActivity::MenuAction;
+  if (compactToolbar()) {
+    // Navigation only; display toggles live in the control center.
+    moreItems.clear();
+    moreItems.reserve(5);
+    moreItems.push_back({MA::TOGGLE_BOOKMARK, StrId::STR_TOGGLE_BOOKMARK});
+    moreItems.push_back({MA::GO_TO_PAGE, StrId::STR_GO_TO_PAGE});
+    moreItems.push_back({MA::GO_TO_PERCENT, StrId::STR_GO_TO_PERCENT});
+    moreItems.push_back({MA::BOOKMARKS, StrId::STR_BOOKMARKS});
+    moreItems.push_back({MA::HIGHLIGHTS, StrId::STR_HIGHLIGHTS});
+    return;
+  }
   EpubReaderMenuActivity::buildMenuItems(moreItems, !currentPageFootnotes.empty(), !cachedBookmarks.empty());
   moreItems.erase(std::remove_if(moreItems.begin(), moreItems.end(),
                                  [](const auto& item) {
@@ -2704,8 +2799,8 @@ void EpubReaderActivity::activateMoreRow(int row) {
   }
   // Leaf actions open their own screen / perform the action; close the overlay first.
   overlay = Overlay::None;
-  if (action == MA::GO_TO_PERCENT && overlayPageStored) {
-    // The percent dialog is a popup over the current frame: wipe the toolbar
+  if ((action == MA::GO_TO_PERCENT || action == MA::GO_TO_PAGE) && overlayPageStored) {
+    // The percent/page dialog is a popup over the current frame: wipe the toolbar
     // chrome back to the clean page first so the dialog draws over the page,
     // not the sheet. No refresh push — the dialog's first frame carries it.
     RenderLock lock;

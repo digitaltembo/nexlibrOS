@@ -10,6 +10,7 @@
 #include <optional>
 #include <vector>
 
+#include "BookPageEstimate.h"
 #include "BookmarkEntry.h"
 #include "ChapterPosition.h"
 #include "EpubReaderMenuActivity.h"
@@ -54,6 +55,8 @@ class EpubReaderActivity final : public ReaderActivity {
   bool bookmarkRemoved = false;
   std::vector<BookmarkEntry> cachedBookmarks;
   std::vector<HighlightEntry> cachedHighlights;
+  // Whole-book page numbers for the compact toolbar and Go to page.
+  BookPageEstimate bookPages;
   // Link the word selector's Go to chose; followed once it closes.
   std::string pendingWordLinkHref;
   bool recentsEntryRemoved = false;
@@ -143,6 +146,10 @@ class EpubReaderActivity final : public ReaderActivity {
   void rememberCurrentContentOffset();
   bool saveProgress(int spineIndex, int currentPage, int pageCount);
   void jumpToPercent(int percent);
+  // 1-based whole-book page and estimated total; false until enough of the
+  // book has been laid out to estimate from.
+  bool bookPagePosition(int& page, int& total) const;
+  void jumpToBookPage(int page);
   void onReaderMenuConfirm(EpubReaderMenuActivity::MenuAction action);
   // Live section position, or the values cached before a child screen
   // released the section.
@@ -151,6 +158,7 @@ class EpubReaderActivity final : public ReaderActivity {
   void openReaderMenu();
   // Toolbar reader menu (see Overlay above).
   bool usesToolbarMenu() const;
+  bool compactToolbar() const;
   void openOverlay(Overlay target);
   void closeOverlayToPage();
   void discardOverlayPage();

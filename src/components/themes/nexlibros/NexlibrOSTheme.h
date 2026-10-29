@@ -15,7 +15,8 @@ constexpr ThemeMetrics values = [] {
 
 // Home: the most recent book as a large card (cover, bold title, author,
 // progress ring), the next books as smaller cards, and an icon bar with
-// Settings, File Transfer, Apps and Library.
+// Settings, File Transfer, Apps and Library. In the reader, the compact
+// toolbar menu (see BaseTheme::compactReaderToolbar).
 class NexlibrOSTheme : public LyraTheme {
  public:
   bool hasCardHome() const override { return true; }
@@ -23,4 +24,5 @@ class NexlibrOSTheme : public LyraTheme {
   void drawCardHome(GfxRenderer& renderer, const CardHomeLayout& layout, const std::vector<RecentBook>& books,
                     const int* progress, int selectorIndex) const override;
   void drawCardHomeCover(const GfxRenderer& renderer, Rect rect, const std::string& thumbPath) const override;
+  bool compactReaderToolbar() const override { return true; }
 };

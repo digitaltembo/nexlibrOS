@@ -319,6 +319,12 @@ class BaseTheme {
   // Draws one cover (or a placeholder when thumbPath is empty/unreadable).
   virtual void drawCardHomeCover(const GfxRenderer&, Rect, const std::string& thumbPath) const {}
 
+  // Toolbar reader menu variant: a thin top status bar (clock, book title,
+  // battery) over a compact bottom sheet that shows the whole-book page
+  // position and drops the chapter scrub row; the More panel keeps only the
+  // navigation actions (bookmark, go to page / percent, bookmarks, highlights).
+  virtual bool compactReaderToolbar() const { return false; }
+
   // Shared constants and helpers for battery drawing (used by all themes)
   static constexpr int batteryPercentSpacing = 4;
   static void drawBatteryOutline(const GfxRenderer& renderer, int x, int y, int battWidth, int rectHeight);

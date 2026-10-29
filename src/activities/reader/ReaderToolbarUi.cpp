@@ -2,6 +2,9 @@
 
 #include <FreeInkUIIcon.h>
 #include <GfxRenderer.h>
+#include <HalClock.h>
+#include <HalGPIO.h>
+#include <HalPowerManager.h>
 #include <I18n.h>
 
 #include <algorithm>
@@ -31,6 +34,7 @@ constexpr int16_t kScrubGap = 12;     // air between the buttons and the track
 // Tool row: a 24px glyph centred in each slot, the active slot in an outline
 // pill. The whole slot is the tap target; the row height sets its size.
 constexpr int16_t kToolRowH = 80;
+constexpr int16_t kCompactToolRowH = 60;
 constexpr int16_t kToolPillInset = 10;
 constexpr int kToolCount = 3;
 // Bottom sheet height for the panels. ListNav fits whole rows in the remaining
@@ -92,10 +96,14 @@ void ReaderToolbarUi::screenFn(UiScreen& screen, void* user) {
   auto* self = static_cast<ReaderToolbarUi*>(user);
   if (self->model_.panel) {
     self->buildPanel(screen);
+  } else if (self->model_.compact) {
+    self->buildCompactToolbar(screen);
   } else {
     self->buildToolbar(screen);
   }
 }
+
+int16_t ReaderToolbarUi::toolRowHeight() const { return model_.compact ? kCompactToolRowH : kToolRowH; }
 
 // The Contents / Text / More row: three equal slots, an icon centred in each,
 // the active one inside an outline pill (the theme's control radius). Each
@@ -110,7 +118,7 @@ void ReaderToolbarUi::buildToolRow(UiScreen& screen, const fui::LayoutAnchor anc
   // (the toolbar's is spaceLg-inset, the panel's is full width): the slots
   // must land on the same x either way, or the icons jump when a tap swaps
   // the toolbar for a panel.
-  const fui::Rect row = screen.take(anchor, kToolRowH).inset(fui::Insets{0, sideInset, 0, sideInset});
+  const fui::Rect row = screen.take(anchor, toolRowHeight()).inset(fui::Insets{0, sideInset, 0, sideInset});
   const int16_t slotW = static_cast<int16_t>(row.width / kToolCount);
   // Theme radius as-is (the frontlight panel pattern); the fill clamps to
   // the shape's own height so round themes cannot overshoot.
@@ -211,6 +219,97 @@ void ReaderToolbarUi::buildToolbar(UiScreen& screen) {
   buildToolRow(screen, fui::LayoutAnchor::Top, 0);  // content band already spaceLg-inset
 }
 
+// Thin status bar across the top of the page: clock left, battery right,
+// book title centred between them. Passive chrome -- a tap on it falls through
+// to the sheet's dismiss target like the rest of the page.
+void ReaderToolbarUi::drawTopBar(UiScreen& screen) {
+  const auto& tokens = screen.theme();
+  const auto& metrics = UITheme::getInstance().getMetrics();
+  const fui::Rect full = screen.frame().screen();
+  const fui::Rect safe = screen.frame().safeRect();
+  fui::TextStyle text = tokens.smallText;
+  const int16_t lineH = screen.target().lineHeight(text.font);
+  constexpr int16_t kRule = 2;  // same weight as the sheet's top rule
+  const int16_t barH = static_cast<int16_t>(lineH + 2 * tokens.spaceSm);
+  // Paint from the glass edge so no page text shows above the bar.
+  const fui::Paint ink = fui::Paint::solid(fui::Color::Black);
+  const int16_t barBottom = static_cast<int16_t>(safe.y + barH);
+  screen.target().fill(fui::Rect{full.x, full.y, full.width, static_cast<int16_t>(barBottom - full.y)},
+                       fui::Paint::solid(fui::Color::White));
+  screen.target().fill(fui::Rect{full.x, barBottom, full.width, kRule}, ink);
+  const fui::Rect content =
+      fui::Rect{safe.x, safe.y, safe.width, barH}.inset(fui::Insets{0, tokens.spaceLg, 0, tokens.spaceLg});
+
+  // Clock (left), when the board has one.
+  char clockText[10];
+  int16_t clockW = 0;
+  if (halClock.isAvailable() && halClock.formatTime(clockText, sizeof(clockText), SETTINGS.clockFormat == 1)) {
+    clockW = screen.target().measureText(text.font, clockText, text).width;
+    screen.target().text(fui::Rect{content.x, content.y, clockW, content.height}, clockText, text);
+  }
+
+  // Battery (right): percent label + glyph.
+  fui::BatteryIndicatorProps battery;
+  const uint16_t percentage = powerManager.getBatteryPercentage();
+  battery.percent = static_cast<uint8_t>(percentage > 100 ? 100 : percentage);
+  battery.charging = gpio.isUsbConnected();
+  battery.text = text;
+  battery.glyphWidth = static_cast<int16_t>(metrics.batteryWidth);
+  battery.glyphHeight = static_cast<int16_t>(metrics.batteryHeight);
+  battery.gap = BaseTheme::batteryPercentSpacing;
+  char percentText[8];
+  int16_t batteryW = static_cast<int16_t>(battery.glyphWidth + 2);  // + terminal nub
+  if (SETTINGS.hideBatteryPercentage != CrossPointSettings::HIDE_BATTERY_PERCENTAGE::HIDE_ALWAYS) {
+    snprintf(percentText, sizeof(percentText), "%u%%", static_cast<unsigned>(battery.percent));
+    battery.label = percentText;
+    batteryW =
+        static_cast<int16_t>(batteryW + battery.gap + screen.target().measureText(text.font, percentText, text).width);
+  }
+  fui::batteryIndicator(
+      screen.frame(), fui::Rect{static_cast<int16_t>(content.right() - batteryW), content.y, batteryW, content.height},
+      battery);
+
+  // Title: centred on the bar, kept clear of whichever side cluster is wider.
+  if (model_.bookTitle) {
+    const int16_t side = static_cast<int16_t>(std::max(clockW, batteryW) + tokens.spaceMd);
+    const fui::Rect titleRect{static_cast<int16_t>(content.x + side), content.y,
+                              static_cast<int16_t>(std::max(0, content.width - 2 * side)), content.height};
+    fui::TextStyle titleStyle = text;
+    titleStyle.bold = true;
+    titleStyle.align = fui::TextAlign::Center;
+    if (!titleRect.empty()) screen.target().text(titleRect, model_.bookTitle, titleStyle);
+  }
+}
+
+// Compact variant: the top bar, then a slim bottom sheet with the book page
+// line over the tool row. No grabber and no chapter scrub row.
+void ReaderToolbarUi::buildCompactToolbar(UiScreen& screen) {
+  const auto& tokens = screen.theme();
+  drawTopBar(screen);
+
+  const int16_t metaH = screen.target().lineHeight(tokens.smallText.font);
+  fui::SheetProps sheetProps;
+  sheetProps.anchor = fui::SheetEdge::Bottom;
+  sheetProps.dismissAction = ACTION_DISMISS;
+  sheetProps.grabberWidth = 0;
+  sheetProps.grabberHeight = 0;
+  sheetProps.grabberMargin = 0;
+  sheetProps.grabberInset = tokens.spaceSm;  // air under the sheet's top rule
+  const int16_t contentH = static_cast<int16_t>(metaH + toolRowHeight() + tokens.spaceSm);
+  screen.sheet(sheetProps, static_cast<int16_t>(sheetProps.grabberInset + contentH));
+  screen.insetContent(fui::Insets{0, tokens.spaceLg, 0, tokens.spaceLg});
+
+  // Book page line, centred.
+  {
+    const fui::Rect line = screen.takeTop(metaH, 0);
+    fui::TextStyle infoStyle = tokens.smallText;
+    infoStyle.align = fui::TextAlign::Center;
+    if (model_.pageInfo) screen.target().text(line, model_.pageInfo, infoStyle);
+  }
+
+  buildToolRow(screen, fui::LayoutAnchor::Top, 0);  // content band already spaceLg-inset
+}
+
 void ReaderToolbarUi::buildPanel(UiScreen& screen) {
   const auto& tokens = screen.theme();
   const fui::Rect safe = screen.frame().safeRect();
@@ -221,6 +320,13 @@ void ReaderToolbarUi::buildPanel(UiScreen& screen) {
   // Same grabber air as the toolbar sheet / frontlight panel.
   sheetProps.grabberMargin = tokens.spaceLg;
   sheetProps.grabberInset = static_cast<int16_t>(tokens.spaceLg + tokens.spaceMd);
+  if (model_.compact) {
+    // Same handle-free edge as the compact toolbar sheet.
+    sheetProps.grabberWidth = 0;
+    sheetProps.grabberHeight = 0;
+    sheetProps.grabberMargin = 0;
+    sheetProps.grabberInset = tokens.spaceMd;
+  }
 
   // Size the sheet to an exact number of list rows instead of a fixed screen
   // share: a percentage leaves up to a row's height of dead space above the
@@ -236,7 +342,7 @@ void ReaderToolbarUi::buildPanel(UiScreen& screen) {
   const int16_t grabberBand =
       static_cast<int16_t>(sheetProps.grabberMargin + sheetProps.grabberHeight + sheetProps.grabberInset);
   const int16_t chrome =
-      static_cast<int16_t>(grabberBand + titleH + tokens.spaceMd + tokens.spaceSm + kToolRowH + tokens.spaceSm);
+      static_cast<int16_t>(grabberBand + titleH + tokens.spaceMd + tokens.spaceSm + toolRowHeight() + tokens.spaceSm);
   const bool landscape = safe.width > safe.height;
   const int16_t target =
       static_cast<int16_t>((safe.height * (landscape ? kLandscapePanelHeightPercent : kPanelHeightPercent)) / 100);

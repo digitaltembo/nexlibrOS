@@ -16,6 +16,9 @@ class MappedInputManager;
 //    Contents / Text / More tile row; the page above it stays untouched.
 //  - Panel: a taller bottom sheet with a title, a paged row list (name left,
 //    value right) and the same tile row as a switcher.
+//  - Compact toolbar (themes with compactReaderToolbar()): a thin top bar
+//    with the clock, book title and battery, and a bottom sheet holding only
+//    the book page line over the tile row -- no scrub row, no grabber.
 //
 // EpubReaderActivity owns the state (which overlay, selection, row contents)
 // and the physical-button handling; this class owns the layout, the tap
@@ -29,6 +32,8 @@ class ReaderToolbarUi : public UiAppHost {
   struct Model {
     bool panel = false;  // false = toolbar, true = a Contents/Text/More panel
     // Toolbar
+    bool compact = false;             // compact variant: top status bar, no scrub row
+    const char* bookTitle = nullptr;  // compact top bar
     const char* chapterTitle = nullptr;
     const char* pageInfo = nullptr;  // "12/40   51%"
     int progressPermille = 0;        // 0..1000 book progress (scrub handle)
@@ -80,8 +85,11 @@ class ReaderToolbarUi : public UiAppHost {
   static void screenFn(UiScreen& screen, void* user);
   static void onAction(const freeink::ui::ActionEvent& event, void* user);
   void buildToolbar(UiScreen& screen);
+  void buildCompactToolbar(UiScreen& screen);
+  void drawTopBar(UiScreen& screen);
   void buildPanel(UiScreen& screen);
   void buildToolRow(UiScreen& screen, freeink::ui::LayoutAnchor anchor, int16_t sideInset);
+  int16_t toolRowHeight() const;
 
   Model model_;
   Routed pending_;
