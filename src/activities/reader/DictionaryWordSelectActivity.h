@@ -4,6 +4,7 @@
 #include <Epub/Page.h>
 #include <I18n.h>
 
+#include <functional>
 #include <memory>
 #include <string>
 #include <vector>
@@ -11,45 +12,48 @@
 #include "activities/Activity.h"
 #include "activities/apps/LuaAppListActivity.h"
 #include "util/DictionaryLookup.h"
-#include "util/HighlightFile.h"
 
 // Word selection over the current reader page: Left/Right step through words
-// in reading order, Up/Down jump rows, Back returns to the reader.
-//
-// Lookup mode: Confirm looks the word up and opens DictionaryDefinitionActivity.
-// Highlight mode: Confirm marks the start of a highlight (or removes the
-// highlight under the cursor), moving extends it, and Confirm again saves it.
+// in reading order, Up/Down jump rows, Back returns to the reader. Confirm looks
+// the word up and opens DictionaryDefinitionActivity.
 //
 // On touch devices a tap on another word moves the cursor and the bubble over
 // it offers Look Up and Highlight (or Remove Highlight), then the lookup hooks
-// of installed Lua apps, which open the app on the word. While a highlight is
-// being extended, taps on words move its end, the bubble's Done (or a tap on
-// the end word) saves it, and a tap away from any word returns to the reader.
+// of installed Lua apps, which open the app on the word. Highlight hands the
+// word to the reader, which opens ClipSelectionActivity on it.
 class DictionaryWordSelectActivity final : public Activity {
  public:
-  enum class Mode : uint8_t { Lookup, Highlight };
+  // Where the page sits, for matching words against saved highlights.
+  struct PageContext {
+    uint16_t spineIndex;
+    uint16_t page;
+    uint16_t pageCount;
+    uint32_t layoutSignature;
+  };
 
-  // `highlights` is the reader's per-book list; this activity edits it in
-  // place and persists it to `bookPath`'s highlight file. Choosing Go to on a
-  // linked word stores the link's href in `followHref` and finishes; the
-  // reader navigates there. Lookups favour dictionaries serving
-  // `bookLanguage` (the EPUB's dc:language) over the rest.
+  // What the reader should do once this activity finishes.
+  struct Outcome {
+    std::string followHref;  // Go to: the link to follow
+    bool startHighlight = false;
+    int highlightX = 0;  // screen point of the word to start highlighting from
+    int highlightY = 0;
+  };
+
+  // Lookups favour dictionaries serving `bookLanguage` (the EPUB's dc:language)
+  // over the rest. `drawHighlights` paints saved highlights under the page text.
   explicit DictionaryWordSelectActivity(GfxRenderer& renderer, MappedInputManager& mappedInput,
-                                        std::unique_ptr<Page> page, int marginLeft, int marginTop, Mode mode,
-                                        bool lookupAvailable, std::vector<HighlightEntry>& highlights,
-                                        std::string bookPath, std::string bookLanguage, uint16_t spineIndex,
-                                        std::string& followHref)
+                                        std::unique_ptr<Page> page, int marginLeft, int marginTop, bool lookupAvailable,
+                                        std::string bookLanguage, const PageContext& context, Outcome& outcome,
+                                        std::function<void(const Page&)> drawHighlights)
       : Activity("DictionaryWordSelect", renderer, mappedInput),
         page(std::move(page)),
         marginLeft(marginLeft),
         marginTop(marginTop),
-        mode(mode),
         lookupAvailable(lookupAvailable),
-        highlights(highlights),
-        bookPath(std::move(bookPath)),
         bookLanguage(std::move(bookLanguage)),
-        spineIndex(spineIndex),
-        followHref(followHref) {}
+        context(context),
+        outcome(outcome),
+        drawHighlights(std::move(drawHighlights)) {}
 
   // Pre-selects the word under a screen point (the reader's long-press) before
   // the activity starts. False when no word is there.
@@ -70,7 +74,9 @@ class DictionaryWordSelectActivity final : public Activity {
     int16_t y;
     int16_t width;
     uint16_t row;
-    uint32_t offset;  // visible-text offset within the spine
+    uint32_t offset;         // visible-text offset within the spine
+    uint32_t endOffset;      // exclusive
+    uint16_t pageWordIndex;  // position among the page's visible words
     const char* text;
     EpdFontFamily::Style style;
   };
@@ -114,7 +120,6 @@ class DictionaryWordSelectActivity final : public Activity {
   void moveVertical(int direction);
   void performLookup(const char* text);
   bool drawHighlightWithSnapshot();
-  void drawSelection(int lo, int hi) const;
   Bubble lookupBubble() const;
   int bubbleHit(int x, int y) const;
   const char* bubbleLabel(const Bubble& bubble, int segment) const;
@@ -122,7 +127,7 @@ class DictionaryWordSelectActivity final : public Activity {
   void drawBubble(const Bubble& bubble) const;
   void drawHints() const;
 
-  // Index into `highlights` of the saved highlight covering words[wordIdx], or -1.
+  // Index in CLIPPINGS of the saved highlight covering words[wordIdx], or -1.
   int highlightAt(int wordIdx) const;
   // The page link that words[wordIdx] belongs to, or nullptr.
   const PageLink* linkAt(int wordIdx) const;
@@ -131,26 +136,21 @@ class DictionaryWordSelectActivity final : public Activity {
   void runAction(StrId action);
   // Opens the hook's app with the selected word.
   void runLookupHook(int index);
-  void saveRange();
   void removeHighlight(int index);
 
   std::unique_ptr<Page> page;
   const int marginLeft;
   const int marginTop;
-  const Mode mode;
   const bool lookupAvailable;
-  std::vector<HighlightEntry>& highlights;
-  const std::string bookPath;
   const std::string bookLanguage;
-  const uint16_t spineIndex;
-  std::string& followHref;
+  const PageContext context;
+  Outcome& outcome;
+  const std::function<void(const Page&)> drawHighlights;
   int fontId = 0;
   int lineHeight = 0;
 
   std::vector<WordBox> words;
   int selected = 0;
-  // First word of the highlight being extended to `selected`; -1 when none.
-  int anchor = -1;
   bool wordsReady = false;
   bool preselected = false;
   std::string pendingLookup;  // see lookUpOnEnter()

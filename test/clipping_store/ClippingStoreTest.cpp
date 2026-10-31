@@ -281,3 +281,42 @@ TEST(ClippingStore, MoveRefusesExistingDestinationHistoryAndDeleteCleansSidecars
   EXPECT_FALSE(Storage.exists((path + ".bak").c_str()));
   EXPECT_FALSE(Storage.exists((path + ".tmp").c_str()));
 }
+
+TEST(ClippingStore, OverlappingRangesMergeAndCoveredRangesAreDetected) {
+  fake::reset();
+  ClippingStore store;
+  ASSERT_TRUE(store.loadForBook("/book.epub", "Book", "Author", "epub"));
+  ASSERT_EQ(store.addClipping(0, 0, 0, 1, 0, 0, 1, "", 0, "a", 1, 10, 20), Result::Added);
+  ASSERT_EQ(store.addClipping(0, 0, 0, 1, 0, 0, 1, "", 0, "b", 1, 30, 40), Result::Added);
+  ASSERT_EQ(store.addClipping(1, 0, 0, 1, 0, 0, 1, "", 0, "other spine", 1, 10, 40), Result::Added);
+
+  EXPECT_TRUE(store.coversRange(0, 12, 18));
+  EXPECT_FALSE(store.coversRange(0, 15, 25));
+  EXPECT_FALSE(store.coversRange(2, 12, 18));
+
+  uint32_t start = 18;
+  uint32_t end = 30;  // touches the second range
+  store.expandOverOverlaps(0, start, end);
+  EXPECT_EQ(start, 10u);
+  EXPECT_EQ(end, 40u);
+
+  ASSERT_EQ(store.addClipping(0, 0, 0, 1, 0, 0, 1, "", 0, "merged", 1, start, end), Result::Added);
+  EXPECT_TRUE(store.removeOverlaps(0, start, end, store.clippingCount() - 1));
+  ASSERT_EQ(store.clippingCount(), 2u);
+  EXPECT_EQ(store.clippingAt(0)->spineIndex, 1);
+  EXPECT_EQ(store.clippingAt(1)->startOffset, 10u);
+  EXPECT_EQ(store.clippingAt(1)->endOffset, 40u);
+}
+
+TEST(ClippingStore, RangesWithoutOffsetsAreNeverMerged) {
+  fake::reset();
+  ClippingStore store;
+  ASSERT_TRUE(store.loadForBook("/book.epub", "Book", "Author", "epub"));
+  ASSERT_EQ(store.addClipping(0, 0, 0, 1, 0, 0, 1, "", 0, "layout only", 1), Result::Added);
+  uint32_t start = 0;
+  uint32_t end = UINT32_MAX - 1;
+  store.expandOverOverlaps(0, start, end);
+  EXPECT_EQ(start, 0u);
+  EXPECT_TRUE(store.removeOverlaps(0, start, end, SIZE_MAX));
+  EXPECT_EQ(store.clippingCount(), 1u);
+}

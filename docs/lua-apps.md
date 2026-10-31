@@ -81,8 +81,7 @@ end
 ```
 
 `<fn>` must be a Lua identifier of at most 24 characters. If the script does
-not define it as a global function, the app shows an error. Hooks are not
-offered while a highlight is being extended.
+not define it as a global function, the app shows an error.
 
 ## Lifecycle
 

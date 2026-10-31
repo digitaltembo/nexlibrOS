@@ -36,6 +36,10 @@ class ClipSelectionActivity final : public Activity {
                         std::span<const std::unique_ptr<Page>> borrowedPages, int marginLeft, int marginTop,
                         Selection selection, int initialX = -1, int initialY = -1);
 
+  // An initial point that misses every word selects the nearest one instead of
+  // cancelling. For callers that already chose a word.
+  void snapInitialPointToNearestWord() { snapInitialPoint = true; }
+
   void onEnter() override;
   void loop() override;
   void render(RenderLock&&) override;
@@ -119,6 +123,7 @@ class ClipSelectionActivity final : public Activity {
   uint16_t rowCount = 0;
   bool touchDragSelecting = false;
   bool ignoreInitialTouch = false;
+  bool snapInitialPoint = false;
   int dragOffsetX = 0;
   int dragOffsetY = 0;
   bool touchDragHasMoved = false;

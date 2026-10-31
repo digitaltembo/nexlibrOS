@@ -52,7 +52,7 @@ int main() {
   bool needsTextGrayscale = true;
   auto drawClippingHighlights = [&](Page&, int, int, int) { assert(++order == 1); };
   auto renderStatusBar = [&] { assert(++order == 3); };
-  auto renderHighlights = [] {};  // nexlibrOS highlights; not drawn here (no absolute grayscale)
+  auto renderBookmarkMarker = [] {};  // not part of this check
 """ + render + r"""
   BoardConfig::a4 = true;
   renderGrayscalePass();

@@ -14,15 +14,13 @@
 #include "BookmarkEntry.h"
 #include "ChapterPosition.h"
 #include "ClipSelectionActivity.h"
+#include "DictionaryWordSelectActivity.h"
 #include "EpubReaderMenuActivity.h"
 #include "LinkNoteTitle.h"
 #include "ProgressMapper.h"
 #include "ReaderActivity.h"
 #include "ReaderToolbarUi.h"
 #include "components/OptionPopup.h"
-#include "util/HighlightFile.h"
-
-class DictionaryWordSelectActivity;
 
 class EpubReaderActivity final : public ReaderActivity {
   std::shared_ptr<Epub> epub;
@@ -60,11 +58,10 @@ class EpubReaderActivity final : public ReaderActivity {
   unsigned long lastRenderCompleteMs = 0;
   bool bookmarkRemoved = false;
   std::vector<BookmarkEntry> cachedBookmarks;
-  std::vector<HighlightEntry> cachedHighlights;
   // Whole-book page numbers for the compact toolbar and Go to page.
   BookPageEstimate bookPages;
-  // Link the word selector's Go to chose; followed once it closes.
-  std::string pendingWordLinkHref;
+  // What the word selector asked for; acted on once it closes.
+  DictionaryWordSelectActivity::Outcome wordSelectOutcome;
   bool recentsEntryRemoved = false;
   unsigned long bookmarkMessageTime = 0UL;
   bool pendingReadFolderMove = false;
@@ -202,13 +199,13 @@ class EpubReaderActivity final : public ReaderActivity {
   void activateMoreRow(int row);
   void openFootnoteSelect(bool reopenMenuOnCancel);
   void openDictionaryWordSelect();
-  void openHighlightSelect();
+  void migrateLegacyHighlights();
   bool openDictionaryAtPoint(int x, int y);
-  std::unique_ptr<DictionaryWordSelectActivity> makeDictionaryWordSelect(bool highlightMode);
+  std::unique_ptr<DictionaryWordSelectActivity> makeDictionaryWordSelect();
   void startWordSelect(std::unique_ptr<DictionaryWordSelectActivity> activity);
   void startClipSelection(int initialX = -1, int initialY = -1,
-                          ClipSelectionActivity::Mode mode = ClipSelectionActivity::Mode::Clip);
-  int clippingAtPoint(const Page& page, int x, int y) const;
+                          ClipSelectionActivity::Mode mode = ClipSelectionActivity::Mode::Clip,
+                          bool snapToNearestWord = false);
   void openClippings();
   void applyProgressChange(const ProgressChangeResult& progress);
   bool launchKOReaderSync();

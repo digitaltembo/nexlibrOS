@@ -51,12 +51,12 @@ One word on the page becomes highlighted:
 2. Press **Confirm** to look up the highlighted word.
 3. Press **Back** to return to the reader.
 
-To look up a phrase, choose **Create Clipping** from the reader menu, select the words, then choose **Look Up**.
+To look up a phrase, choose **Highlight** from the reader menu (or from the long-press bubble on touch devices), select the words, then choose **Look Up**.
 
 On touch devices (X4 Pro and other touchscreen readers), long-press a word on the reading page to select it. A bubble above the word offers:
 
 - **Look Up** — show its definition (only when a dictionary is selected). Tapping the selected word does the same.
-- **Highlight** — start a highlight at this word. Tap further words to extend it, then tap **Done** (or the last word again) to save it. On a word that is already highlighted, this becomes **Remove Highlight**. Highlights are saved per book in `/.crosspoint/highlights/` and drawn with a gray background.
+- **Highlight** — start a highlight at this word. Drag the selection handles to adjust it, then tap **Highlight** to save it. On a word that is already highlighted, this becomes **Remove Highlight**. Highlights are saved per book and drawn with a gray background.
 - **Go to** — follow the link the word belongs to (only on linked words).
 
 Tap another word to move the selection there, or tap away from the text to return to the reader. While **Settings → Controls → Long-Press Word to Look Up** is on (the default), this replaces **Look Up** and **Highlight** in the reader menu. Turn it off to get those menu entries back and leave long-presses to page-turn behavior.

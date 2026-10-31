@@ -61,6 +61,12 @@ class ClippingStore {
                         uint16_t paragraphIndex, const std::string& text, uint32_t layoutSignature,
                         uint32_t startOffset = UINT32_MAX, uint32_t endOffset = UINT32_MAX);
   bool removeClippingAt(size_t index);
+  // True when one saved range already covers [start, end) in this spine.
+  bool coversRange(uint16_t spineIndex, uint32_t start, uint32_t end) const;
+  // Grows [start, end) over every saved range it overlaps or touches.
+  void expandOverOverlaps(uint16_t spineIndex, uint32_t& start, uint32_t& end) const;
+  // Removes saved ranges overlapping or touching [start, end), except `keepIndex`.
+  bool removeOverlaps(uint16_t spineIndex, uint32_t start, uint32_t end, size_t keepIndex);
   bool saveToFile();
   bool prepareSync();
   bool finishUploads();

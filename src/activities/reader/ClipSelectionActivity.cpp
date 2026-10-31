@@ -104,7 +104,8 @@ void ClipSelectionActivity::onEnter() {
   }
   currentPageOffset = words[selected].pageOffset;
   if (initialX >= 0) {
-    const int hit = wordAt(initialX, initialY);
+    int hit = wordAt(initialX, initialY);
+    if (hit < 0 && snapInitialPoint) hit = dragWordAt(initialX, initialY);
     if (hit < 0) {
       cancel();
       return;

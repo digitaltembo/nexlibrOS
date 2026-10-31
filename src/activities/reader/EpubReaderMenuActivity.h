@@ -31,10 +31,8 @@ class EpubReaderMenuActivity final : public UiListActivity {
     SYNC,
     DELETE_CACHE,
     DICTIONARY,
-    HIGHLIGHT,
     // Compact toolbar More panel only (see BaseTheme::compactReaderToolbar).
     GO_TO_PAGE,
-    HIGHLIGHTS,
     SEARCH
   };
 

@@ -31,7 +31,6 @@ highlight_draw = method("void ClipSelectionActivity::drawWordHighlight", "bool C
 selection_draw = method("void ClipSelectionActivity::drawSelection", "void ClipSelectionActivity::render(")
 word_font = method("int clippingWordFont", "Rect clippingWordRect", reader_source)
 word_rect = method("Rect clippingWordRect", "int clampPercent", reader_source)
-saved_hit = method("int EpubReaderActivity::clippingAtPoint", "void EpubReaderActivity::drawClippingHighlights", reader_source)
 saved_draw = method("void EpubReaderActivity::drawClippingHighlights", "void EpubReaderActivity::renderStatusBar", reader_source)
 
 # Compile production extraction, export, and redraws with bounded UI/rendering stubs.
@@ -227,10 +226,9 @@ struct EpubReaderActivity {
   struct Section { int currentPage = 0, pageCount = 1; } sectionData;
   Section* section = &sectionData;
   int currentSpineIndex = 0, buildViewportWidth = 480, buildViewportHeight = 800;
-  int clippingAtPoint(const Page&, int, int) const;
   void drawClippingHighlights(const Page&, int, int, int) const;
 };
-""" + word_font + word_rect + saved_hit + saved_draw + r"""
+""" + word_font + word_rect + saved_draw + r"""
 int loadLine(ClipSelectionActivity& activity, const std::vector<std::string>& logical,
              bool rtl, int first = 0, uint32_t offset = 0, uint16_t row = 0) {
   std::vector<uint16_t> visual;
@@ -357,8 +355,6 @@ int main() {
     assert(activity.renderer.fills.size() == 1);
     const int width = activity.words[0].width;
     assert(activity.renderer.fills[0].width == width);
-    assert(reader.clippingAtPoint(*activity.pages[0], width - 1, 8) == 0);
-    assert(reader.clippingAtPoint(*activity.pages[0], width, 8) == -1);
   }
   for (const auto& logical : {std::vector<std::string>{"אחד", "alpha", "beta", "שני"},
                               std::vector<std::string>{"واحد", "alpha", "beta", "اثنان"}}) {

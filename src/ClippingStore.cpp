@@ -227,6 +227,46 @@ ClippingStore::AddResult ClippingStore::addClipping(const uint16_t spineIndex, c
   return AddResult::Added;
 }
 
+namespace {
+bool rangesTouch(const Clipping& clipping, const uint16_t spineIndex, const uint32_t start, const uint32_t end) {
+  return clipping.spineIndex == spineIndex && clipping.startOffset != UINT32_MAX && clipping.endOffset != UINT32_MAX &&
+         clipping.startOffset <= end && start <= clipping.endOffset;
+}
+}  // namespace
+
+bool ClippingStore::coversRange(const uint16_t spineIndex, const uint32_t start, const uint32_t end) const {
+  for (size_t i = 0; i < clippingSize; ++i) {
+    const Clipping& clipping = *clippingAt(i);
+    if (rangesTouch(clipping, spineIndex, start, end) && clipping.startOffset <= start && end <= clipping.endOffset) {
+      return true;
+    }
+  }
+  return false;
+}
+
+void ClippingStore::expandOverOverlaps(const uint16_t spineIndex, uint32_t& start, uint32_t& end) const {
+  bool grew = true;
+  while (grew) {
+    grew = false;
+    for (size_t i = 0; i < clippingSize; ++i) {
+      const Clipping& clipping = *clippingAt(i);
+      if (!rangesTouch(clipping, spineIndex, start, end)) continue;
+      if (clipping.startOffset < start || clipping.endOffset > end) grew = true;
+      start = std::min(start, clipping.startOffset);
+      end = std::max(end, clipping.endOffset);
+    }
+  }
+}
+
+bool ClippingStore::removeOverlaps(const uint16_t spineIndex, const uint32_t start, const uint32_t end,
+                                   const size_t keepIndex) {
+  bool ok = true;
+  for (size_t i = clippingSize; i-- > 0;) {
+    if (i != keepIndex && rangesTouch(*clippingAt(i), spineIndex, start, end) && !removeClippingAt(i)) ok = false;
+  }
+  return ok;
+}
+
 bool ClippingStore::removeClippingAt(const size_t index) {
   if (!loaded || index >= clippingSize) return false;
   if (clippingRef(index).id[0]) {

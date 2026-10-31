@@ -65,7 +65,7 @@ nexlibrOS behaves like CrossPoint except for the following changes:
   - [5. Reader Menu](#5-reader-menu)
     - [5.1 Chapter Selection](#51-chapter-selection)
     - [5.2 Bookmarks](#52-bookmarks)
-    - [5.3 Clippings and Highlights](#53-clippings-and-highlights)
+    - [5.3 Highlights](#53-highlights)
   - [6. Current Limitations \& Roadmap](#6-current-limitations--roadmap)
   - [7. Troubleshooting Issues \& Escaping Bootloop](#7-troubleshooting-issues--escaping-bootloop)
 
@@ -415,7 +415,7 @@ Some settings only appear on devices that support them, such as touch controls, 
 
 #### 3.6.4 Controls
 
-- **Home Button Gestures**: Choose what the X4 Pro's Home key does on a **Tap** (default "Home"), **Double Tap** (default "Toggle Frontlight"), and **Long Press** (default "Reader Menu"). Other choices include "Ignore", "Page Turn", "Refresh Screen", "Links and Footnotes", "Confirm", "KOSync", "Bookmark", "Dictionary", and "Create Clipping". *(Devices with a Home key.)*
+- **Home Button Gestures**: Choose what the X4 Pro's Home key does on a **Tap** (default "Home"), **Double Tap** (default "Toggle Frontlight"), and **Long Press** (default "Reader Menu"). Other choices include "Ignore", "Page Turn", "Refresh Screen", "Links and Footnotes", "Confirm", "KOSync", "Bookmark", "Dictionary", and "Highlight". *(Devices with a Home key.)*
 
 - **Touch Reader Controls**: Turn touch page-turning on the reading page on or off. The frontlight panel also has a tile for toggling this quickly. *(Touch devices.)*
 
@@ -443,7 +443,7 @@ Some settings only appear on devices that support them, such as touch controls, 
   - "Refresh" - A short press triggers a manual full-screen refresh, useful for clearing ghosting
   - "Links and Footnotes" - A short press in reading mode opens link selection. If the page has only one link, it opens directly. After following a link, a short press returns to the previous location.
   - "Confirm" - A short press acts as **Confirm** *(touch devices only)*
-  - "Create Clipping" - A short press in reading mode starts clipping selection *(button-only devices)*
+  - "Highlight" - A short press in reading mode starts highlight selection *(button-only devices)*
   - "Bookmark", "KOSync", "Reader Menu" - A short press runs that action *(touch devices without a Home key)*
 - **Quick-return from footnotes**: When **Short Power Button Click** is "Links and Footnotes", a short press of the power button acts as Back after following a link or footnote.
 
@@ -455,14 +455,14 @@ The following apply **only to button-only devices**:
 
 - **Remap Front Buttons**: A menu for customising the function of each bottom edge button.
 
-- **Bluetooth Page Turner** (**Settings → Network**): Enable Bluetooth, then open **Scan for Remotes** to connect a page turner. **Paired Remotes** lists saved remotes; selecting a row marked **Forget** removes it. Once connected, open **Map Buttons**, choose a page, chapter, Confirm, Back, reader menu, or clipping action, and press the remote button within 15 seconds. Release the button within 15 seconds: a hold of at least 0.7 seconds is mapped separately from its tap. If the remote never reports a release, learning waits 15 seconds and saves the press as a tap. Hold Confirm on an action, or long-press its row, to clear it. Back cancels learning or returns to the Bluetooth menu. Mapping is optional: without custom mappings, the default remote controls remain available. Each button gesture maps to one action; assigning it again replaces its previous action. Confirm and Back act like the device buttons while reading and in the reader list menu. Next/Previous Page navigate items while a reader menu is open and turn pages when it is closed. Bluetooth can also be toggled from the reader list menu or the toolbar’s **More** menu.
+- **Bluetooth Page Turner** (**Settings → Network**): Enable Bluetooth, then open **Scan for Remotes** to connect a page turner. **Paired Remotes** lists saved remotes; selecting a row marked **Forget** removes it. Once connected, open **Map Buttons**, choose a page, chapter, Confirm, Back, reader menu, or highlight action, and press the remote button within 15 seconds. Release the button within 15 seconds: a hold of at least 0.7 seconds is mapped separately from its tap. If the remote never reports a release, learning waits 15 seconds and saves the press as a tap. Hold Confirm on an action, or long-press its row, to clear it. Back cancels learning or returns to the Bluetooth menu. Mapping is optional: without custom mappings, the default remote controls remain available. Each button gesture maps to one action; assigning it again replaces its previous action. Confirm and Back act like the device buttons while reading and in the reader list menu. Next/Previous Page navigate items while a reader menu is open and turn pages when it is closed. Bluetooth can also be toggled from the reader list menu or the toolbar’s **More** menu.
 
 
 - **Long-press Menu**: Selects the function bound to holding the menu button (Confirm) while reading an EPUB. **Cycles through the available functions** each time the setting is selected. A short press of Confirm always opens the reader menu as normal:
   - "Bookmark" (default) - Hold Confirm (~0.4 second) to drop a bookmark at the current page.
   - "KOSync" - Hold Confirm (~1 second) to launch KOReader sync directly.
   - "Dictionary" - Hold Confirm (~0.4 second) to start dictionary word selection on the current page (see [docs/dictionary.md](docs/dictionary.md)).
-  - "Create Clipping" - Hold Confirm (~0.4 second) to start clipping selection on the current page.
+  - "Highlight" - Hold Confirm (~0.4 second) to start highlight selection on the current page.
   - "Links and Footnotes" - Hold Confirm to open link selection, or to return after following a link.
   - "Disabled" - Long-press is ignored; only short-press opens the reader menu.
 
@@ -698,7 +698,7 @@ If you use the HTTPS listener, use `https://<server-ip>:7200` (`curl -k` only fo
 
 Once any of the options above is set up, open the **[Reader Menu](#5-reader-menu)** while reading and select **Sync Progress**. To sync in one step, set one of the Home key's actions to **KOSync** in **Settings → Controls → Home Button Gestures**. On button-only devices, set **Settings → Controls → Long-press Menu** to **KOSync** and hold Confirm instead.
 
-- **Sync Clippings** is off by default. Enable it only for a compatible CrossPoint Sync server; manual **Sync Progress** then uploads and downloads this book’s clippings too. Leave it off for ordinary KOSync servers.
+- **Sync Highlights** is off by default. Enable it only for a compatible CrossPoint Sync server; manual **Sync Progress** then uploads and downloads this book’s highlights too. Leave it off for ordinary KOSync servers.
 - With **Sync Behavior** set to **Ask every time**, choose **Apply Remote** to jump to remote progress or **Upload Local** to push current progress.
 - With **Sync Behavior** set to **Smart sync**, CrossPoint auto-resolves simple cases: upload when no remote progress exists, confirm and leave both unchanged when local and remote progress are already synchronized, upload when local progress is further ahead, or apply remote when remote progress is further ahead.
 
@@ -867,11 +867,11 @@ See [docs/dictionary.md](docs/dictionary.md) for supported formats, setup, langu
 
 Highlights mark passages with a gray background that stays put when you change the font, margins, or orientation.
 
-To highlight, long-press the first word and choose **Highlight** from the bubble. Tap further words to extend the highlight, then tap **Done** (or the last word again) to save it. Tap away from the text to cancel. To remove a highlight, long-press a highlighted word and choose **Remove Highlight**.
+To highlight, long-press a word and choose **Highlight** from the bubble, then drag the selection handles and tap **Highlight**. To remove one, long-press a highlighted word and choose **Remove Highlight**, or delete it from the **Highlights** list.
 
-**On button-only devices:** Choose **Highlight** in the **[Reader Menu](#5-reader-menu)**. Move to the first word and press **Confirm**, move to the last word, then press **Confirm** again to save. Pressing **Confirm** on an existing highlight removes it. Press **Back** to cancel.
+**On button-only devices:** Choose **Highlight** in the **[Reader Menu](#5-reader-menu)**. Move to the first word and press **Confirm**, move to the last word, press **Confirm** again, then choose **Highlight**. Remove highlights from the **Highlights** list.
 
-Highlights are saved per book in the `.crosspoint/highlights` folder on the SD card.
+See [Highlights in detail](#53-highlights) for limits, syncing and export. Highlights made with earlier firmware move to the new store automatically the first time you open each book.
 
 ### System Navigation
 
@@ -883,7 +883,7 @@ Highlights are saved per book in the `.crosspoint/highlights` folder on the SD c
 * **Return to Home:** Press **Back** to close the book and return to the Home screen.
 * **Return to Browse Files:** Press and hold **Back** to close the book and return to the **[Browse Files](#33-browse-files-screen)** screen. **Short Back to File Browser** in Controls Settings swaps the short and long press.
 * **Reader Menu:** Press **Confirm**.
-* **Long-press Confirm (configurable):** Holding **Confirm** runs the function chosen by the **Long-press Menu** setting in **[Controls Settings](#364-controls)** — "Bookmark" (default) drops a bookmark, "KOSync" launches KOReader Sync, "Dictionary" starts a word lookup, "Create Clipping" starts clipping selection, "Disabled" does nothing. A short press always opens the Reader Menu.
+* **Long-press Confirm (configurable):** Holding **Confirm** runs the function chosen by the **Long-press Menu** setting in **[Controls Settings](#364-controls)** — "Bookmark" (default) drops a bookmark, "KOSync" launches KOReader Sync, "Dictionary" starts a word lookup, "Highlight" starts highlight selection, "Disabled" does nothing. A short press always opens the Reader Menu.
 
 ### Supported Languages
 
@@ -910,9 +910,8 @@ Available options include:
 - **Night Mode** – Invert the screen.
 - **Frontlight** – Adjust the frontlight *(frontlight devices only)*.
 - **Look Up** – Select a word on the current page and show its dictionary definition (see [Dictionary Lookup](#dictionary-lookup)). Requires a dictionary to be selected in **Settings → Reader → Dictionary**.
-- **Highlight** – Select a passage to highlight, or remove an existing highlight (see [Highlights](#highlights)).
-- **Create Clipping** – Select a range of text on the current page and save it as a highlighted clipping.
-- **View Clippings** – Open this book's saved clippings *(shown after the first clipping is saved)*.
+- **Highlight** – Select a passage to highlight (see [Highlights](#highlights)).
+- **Highlights** – List this book's highlights *(shown after the first highlight is saved)*.
 - **Reading Orientation** – Cycle through screen orientations without leaving the reader.
 - **Auto Turn (Pages Per Minute)** – Cycle through automatic page turn speed options for hands-free reading.
 - **Go to %** – Jump to a specific position in the book by percentage.
@@ -951,17 +950,17 @@ To see your bookmarks, open the **[Reader Menu](#5-reader-menu)** and choose **B
 
 Bookmarks are stored in the `.crosspoint/bookmarks` folder in the JSON format.
 
-### 5.3 Clippings and Highlights
+### 5.3 Highlights
 
-Select **Create Clipping** from the Reader Menu, move to the first word, and press **Confirm**. Move to the last word and press **Select** again to choose **Look Up**, **Clip**, or **Bookmark**. **Back** closes that popup without losing the selection. On touch devices with **Long-Press Word to Look Up** turned off, press and hold a word in the reader to select it (while it is on, a long press opens the word bubble described in [Dictionary Lookup](#dictionary-lookup)). Drag either selection handle to adjust the range, then tap **Look Up**, **Clip**, or **Bookmark** above it. Hold the ending handle at the bottom edge or over the final word for one second to extend onto the next preloaded page. Selection covers up to three pages in the same chapter, subject to the 240 selectable-word limit. The toolbar overlays the page without shifting the text. Releasing a handle keeps the selection open; tapping outside the text dismisses it. **Look Up** searches the selected text in your dictionary; **Bookmark** toggles the bookmark on the selection’s final page. Saved ranges with source offsets remain highlighted after changes to font, spacing, orientation, or pagination. Ranges without source offsets can only be highlighted when their saved layout still matches. With **Long-Press Word to Look Up** off, press and hold highlighted text to remove that clipping; its deletion is sent on the next manual sync when **Sync Clippings** is enabled.
+Select **Highlight** from the Reader Menu, move to the first word, and press **Confirm**. Move to the last word and press **Select** again to choose **Look Up**, **Highlight**, or **Bookmark**. **Back** closes that popup without losing the selection. On touch devices, choose **Highlight** from the long-press bubble; with **Long-Press Word to Look Up** turned off and **Touch Reader Controls** on, press and hold a word to go straight to selection. Drag either selection handle to adjust the range, then tap **Look Up**, **Highlight**, or **Bookmark** above it. Hold the ending handle at the bottom edge or over the final word for one second to extend onto the next preloaded page. Selection covers up to three pages in the same chapter, subject to the 240 selectable-word limit. The toolbar overlays the page without shifting the text. Releasing a handle keeps the selection open; tapping outside the text dismisses it. **Look Up** searches the selected text in your dictionary; **Bookmark** toggles the bookmark on the selection's final page. A new highlight that overlaps existing ones replaces them: the gray area covers all of them, but the saved text is only your latest selection. Saved ranges with source offsets remain highlighted after changes to font, spacing, orientation, or pagination. Ranges without source offsets can only be highlighted when their saved layout still matches.
 
-Select **View Clippings** to browse saved excerpts for the current book. Press **Confirm** to choose **Open** or **Go to Passage**, or hold **Confirm** for about 0.7 seconds to delete it. **Go to Passage** uses the saved text offset and is available for new, source-anchored clippings. Older clippings can still be read or deleted. Touch devices can open a clipping with a tap or delete it with a long press.
+Select **Highlights** to list this book's highlights in reading order. Tap one, or press **Confirm**, to jump to it. Long-press it, or hold **Confirm** for about 0.7 seconds, to choose **Open** (read the saved text) or **Delete**. Highlights without a saved text offset open their text instead of jumping. Deletions are sent on the next manual sync when **Sync Highlights** is enabled.
 
-Each book can store up to **1,024 clippings on ESP32-S3 devices** or **256 on ESP32-C3 devices**. These limits also apply to clippings downloaded through sync.
+Each book can store up to **1,024 highlights on ESP32-S3 devices** or **256 on ESP32-C3 devices**. These limits also apply to highlights downloaded through sync.
 
-The structured clipping store under `.crosspoint/clippings` keeps up to **4 KiB of UTF-8 text per clipping**. Longer selections must be shortened before saving. CrossPoint also appends up to **2,000 UTF-8 bytes** of each saved excerpt to `My Clippings.txt` in the root of the SD card, using Kindle-compatible formatting. If that export fails, the clipping remains saved and the message reports the export failure.
+The store under `.crosspoint/clippings` keeps up to **4 KiB of UTF-8 text per highlight**. Longer selections must be shortened before saving. CrossPoint also appends up to **2,000 UTF-8 bytes** of each saved excerpt to `My Clippings.txt` in the root of the SD card, using Kindle-compatible formatting. If that export fails, the highlight remains saved and the message reports the export failure.
 
-Local book and folder moves carry clipping data with them. Deleting a local book removes its local clipping data; it does not delete already synced server copies or historical entries in `My Clippings.txt`. Deleting an individual clipping likewise leaves the text export untouched, but queues its server deletion for the next enabled manual sync. `My Clippings.txt` is an independent append-only export, not the source used to restore or sync highlights.
+Local book and folder moves carry highlights with them. Deleting a local book removes its local highlights; it does not delete already synced server copies or historical entries in `My Clippings.txt`. Deleting an individual highlight likewise leaves the text export untouched, but queues its server deletion for the next enabled manual sync. `My Clippings.txt` is an independent append-only export, not the source used to restore or sync highlights.
 
 ## 6. Current Limitations & Roadmap
 

@@ -45,23 +45,14 @@ bool HighlightFile::load(const std::string& bookPath, std::vector<HighlightEntry
   return true;
 }
 
-bool HighlightFile::save(const std::string& bookPath, const std::vector<HighlightEntry>& highlights) {
-  JsonDocument doc;
-  JsonArray arr = doc["highlights"].to<JsonArray>();
-  for (const auto& entry : highlights) {
-    JsonObject obj = arr.add<JsonObject>();
-    obj["si"] = entry.spineIndex;
-    obj["s"] = entry.start;
-    obj["e"] = entry.end;
-    obj["text"] = entry.text;
-  }
-
-  // writeDocToFile ensures /.crosspoint; the highlights subdirectory is ours.
-  Storage.mkdir(HIGHLIGHTS_DIR);
+void HighlightFile::retire(const std::string& bookPath) {
   const std::string path = highlightPath(bookPath);
-  if (!PersistableStoreBase::writeDocToFile(path.c_str(), doc)) {
-    LOG_ERR("HLT", "Failed to save %zu highlights", highlights.size());
-    return false;
+  // Never overwrites an earlier set-aside file: it may hold entries that did not fit.
+  std::string target = path + ".migrated";
+  for (int n = 1; Storage.exists(target.c_str()) && n < 100; n++) {
+    target = path + ".migrated." + std::to_string(n);
   }
-  return true;
+  if (!Storage.rename(path.c_str(), target.c_str())) {
+    LOG_ERR("HLT", "Failed to set aside %s", path.c_str());
+  }
 }
