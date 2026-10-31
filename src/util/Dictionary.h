@@ -70,7 +70,7 @@ class Dictionary {
   // missing or stale — call buildIndex() first so the UI can show an
   // "Indexing…" message for the slow first pass.
 
-  // True when the .ifo declares sametypesequence=h — definitions are HTML and
+  // True when the .ifo declares sametypesequence=h or x (HTML or XDXF) and
   // the viewer may lay them out through the EPUB rendering pipeline.
   bool definitionsAreHtml() const { return htmlDefinitions; }
 
@@ -104,7 +104,14 @@ class Dictionary {
   // reports the precise outcome so the UI can distinguish a genuine miss from a
   // decompression / low-memory / read failure.
   bool lookup(const char* word, std::string& definitionOut, std::string& matchedHeadwordOut,
-              LookupResult* outResult = nullptr);
+              LookupResult* outResult = nullptr, DictLocation* locationOut = nullptr);
+
+  // Reload the exact entry, including synonym targets with duplicate headwords.
+  // Reads and joins the definitions at location. Fails (setting *outResult, if
+  // given, to Decompress / LowMemory / ReadError) only when the first entry
+  // can't be read; a later entry that can't be read or doesn't fit in memory
+  // ends the definition early instead.
+  bool readDefinition(const DictLocation& location, std::string& out, LookupResult* outResult = nullptr);
 
   static std::string cleanWord(const char* word);
 
@@ -204,11 +211,6 @@ class Dictionary {
   // buildIndex() so each sidecar is rebuilt only when actually stale.
   static bool sidecarIsStale(const std::string& sourcePath, const std::string& sidecarPath, uint32_t magic);
 
-  // Read and join the definitions at location. Fails (setting *outResult, if
-  // given, to Decompress / LowMemory / ReadError) only when the first entry
-  // can't be read; a later entry that can't be read or doesn't fit in memory
-  // ends the definition early instead.
-  bool readDefinition(const DictLocation& location, std::string& out, LookupResult* outResult = nullptr);
   // Append prefix plus size bytes of the entry at offset to out. out grows only
   // after any .dict.dz extraction has released its inflate buffers; on failure
   // it is left unchanged.

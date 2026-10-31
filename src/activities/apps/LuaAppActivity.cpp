@@ -38,10 +38,11 @@ static_assert(sizeof(SWIPE_NAMES) / sizeof(SWIPE_NAMES[0]) == sizeof(SWIPES) / s
 constexpr const char* FONT_NAMES[] = {"ui",      "ui_large", "small",   "sans12",  "sans14", "sans16", "sans18",
                                       "serif12", "serif14",  "serif16", "serif18", "reader", nullptr};
 // "reader" (READER_FONT_ID) resolves to the reading font family and size from settings.
+// Noto Serif is no longer built in, so the serif names draw with Noto Sans.
 constexpr int READER_FONT_ID = 0;
-constexpr int FONT_IDS[] = {UI_10_FONT_ID,        UI_12_FONT_ID,        SMALL_FONT_ID,        NOTOSANS_12_FONT_ID,
-                            NOTOSANS_14_FONT_ID,  NOTOSANS_16_FONT_ID,  NOTOSANS_18_FONT_ID,  NOTOSERIF_12_FONT_ID,
-                            NOTOSERIF_14_FONT_ID, NOTOSERIF_16_FONT_ID, NOTOSERIF_18_FONT_ID, READER_FONT_ID};
+constexpr int FONT_IDS[] = {UI_10_FONT_ID,       UI_12_FONT_ID,       SMALL_FONT_ID,       NOTOSANS_12_FONT_ID,
+                            NOTOSANS_14_FONT_ID, NOTOSANS_16_FONT_ID, NOTOSANS_18_FONT_ID, NOTOSANS_12_FONT_ID,
+                            NOTOSANS_14_FONT_ID, NOTOSANS_16_FONT_ID, NOTOSANS_18_FONT_ID, READER_FONT_ID};
 static_assert(sizeof(FONT_NAMES) / sizeof(FONT_NAMES[0]) == sizeof(FONT_IDS) / sizeof(FONT_IDS[0]) + 1);
 constexpr const char* STYLE_NAMES[] = {"regular", "bold", "italic", "bold_italic", nullptr};
 constexpr const char* REFRESH_NAMES[] = {"fast", "half", "full", nullptr};

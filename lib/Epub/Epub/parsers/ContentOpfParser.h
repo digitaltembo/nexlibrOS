@@ -21,6 +21,7 @@ class ContentOpfParser final : public Print {
     IN_BOOK_AUTHOR,
     IN_BOOK_LANGUAGE,
     IN_BOOK_SUBJECT,
+    IN_BOOK_IDENTIFIER,
     IN_META_TEXT,  // EPUB 3 <meta property="..."> whose text content is kept
     IN_MANIFEST,
     IN_SPINE,
@@ -43,6 +44,9 @@ class ContentOpfParser final : public Print {
   // separation as element state rather than inferring either from callbacks.
   bool metadataSpacePending = false;
   bool authorSeparatorPending = false;
+
+  std::string identifierText;
+  std::string identifierScheme;
 
   // Index for fast idref→href lookup (binary search over .items.bin)
   struct ItemIndexEntry {
@@ -86,6 +90,8 @@ class ContentOpfParser final : public Print {
   std::string title;
   std::string author;
   std::string language;
+  std::string isbn;
+  std::string asin;
   // Sort keys, series and tags; each is empty when the OPF does not provide it.
   std::string titleSort;
   std::string authorSort;  // file-as of the first creator whose role is "aut" or unset

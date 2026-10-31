@@ -125,7 +125,7 @@ pass `false` to draw white.
 | `gfx.circle(cx, cy, r [, black])`, `gfx.fill_circle(...)` | |
 | `gfx.polygon({x1, y1, x2, y2, ...} [, black])` | Closed outline, up to 256 points. |
 | `gfx.fill_polygon({...} [, black])` | |
-| `gfx.font(name [, style])` | `ui` (default), `ui_large`, `small`, `sans12`–`sans18`, `serif12`–`serif18`, `reader` (the reading font, size and line spacing from the reader settings); style `regular`, `bold`, `italic`, `bold_italic`. Applies to the text functions below. |
+| `gfx.font(name [, style])` | `ui` (default), `ui_large`, `small`, `sans12`–`sans18`, `serif12`–`serif18` (drawn with Noto Sans; Noto Serif is no longer built in), `reader` (the reading font, size and line spacing from the reader settings); style `regular`, `bold`, `italic`, `bold_italic`. Applies to the text functions below. |
 | `gfx.text(x, y, str [, black])` | `y` is the top of the line. |
 | `gfx.text_width(str)`, `gfx.line_height()` | Measurement; usable outside `draw()`. |
 | `gfx.wrap(str, max_width [, max_lines])` | Word-wraps to a table of lines. |

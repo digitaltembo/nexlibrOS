@@ -8,6 +8,7 @@
 #include <Logging.h>
 #include <Memory.h>
 #include <Utf8.h>
+#include <Xtc.h>
 #include <strings.h>  // strcasecmp
 
 #include <algorithm>
@@ -210,14 +211,10 @@ void clearLibraryIndexDirty() {
   }
 }
 
-bool isBookName(const std::string& name) {
-  return FsHelpers::checkFileExtension(name, ".epub") || FsHelpers::checkFileExtension(name, ".txt") ||
-         FsHelpers::checkFileExtension(name, ".md") || FsHelpers::checkFileExtension(name, ".xtc");
-}
-
 // macOS AppleDouble sidecars and hidden entries. The file browser already hides
 // these (FileBrowserActivity isMacOSMetadataEntry); the shelf must agree, or a
-// card written on a Mac shows every book twice.
+// card written on a Mac shows every book twice. isLibraryBookFile() applies the
+// same rule to whole paths.
 bool isHiddenOrSidecar(const char* name) { return name[0] == '.'; }
 
 // Lua apps keep their notes and data as .txt/.md files under /apps; those are
@@ -375,7 +372,8 @@ uint8_t stageTags(const std::string& joined, char* out) {
   entry.pathHash = clixPathHash(fullPath.data(), fullPath.size());
   const int priorIndex = findPrior(st, entry.pathHash);
 
-  const bool extractionExpected = st.readMetadata && FsHelpers::hasEpubExtension(name);
+  const bool isXtc = FsHelpers::hasXtcExtension(name);
+  const bool extractionExpected = st.readMetadata && (FsHelpers::hasEpubExtension(name) || isXtc);
   const uint8_t expectedStatus = extractionExpected ? CLIX_METADATA_EXTRACTED : CLIX_METADATA_NOT_ATTEMPTED;
   bool reuseMetadata = false;
   ClixRecord priorRecord{};
@@ -411,9 +409,24 @@ uint8_t stageTags(const std::string& joined, char* out) {
   // builds spine, TOC, CSS, cover, or section caches during the library walk.
   if (!reuseMetadata && extractionExpected) {
     st.stats->parsed++;
-    Epub epub(fullPath, CACHE_DIR);
     std::string bookTitle;
-    if (epub.loadMetadata(bookTitle, author, st.extended)) {
+    bool loaded = false;
+    if (isXtc) {
+      // XTC/XTCH carry title and author in their own header block; load() reads that and the
+      // page table header, and writes no cache.
+      // No sort keys, series or tags here: clear the previous book's.
+      if (st.extended) *st.extended = {};
+      Xtc xtc(fullPath, CACHE_DIR);
+      loaded = xtc.load();
+      if (loaded) {
+        bookTitle = xtc.getTitle();
+        author = xtc.getAuthor();
+      }
+    } else {
+      Epub epub(fullPath, CACHE_DIR);
+      loaded = epub.loadMetadata(bookTitle, author, st.extended);
+    }
+    if (loaded) {
       entry.record.metadataStatus = CLIX_METADATA_EXTRACTED;
       if (!bookTitle.empty()) {
         title = std::move(bookTitle);
@@ -570,7 +583,7 @@ void walk(WalkState& st, const std::string& path, const int depth) {
       }
       continue;
     }
-    if (!isBookName(name)) continue;
+    if (!isLibraryBookFile(name)) continue;
 
     // A zero-length book is a dangling directory entry: the name enumerates but
     // the contents do not exist. Counted rather than silently dropped.
@@ -1462,6 +1475,21 @@ const char* libraryIndexPath() { return INDEX_PATH; }
 
 uint32_t libraryCustomListsHash(const uint8_t listOptions) {
   return (listOptions & CLIX_OPTION_CUSTOM) != 0 ? customListsHash(CUSTOM_LISTS_PATH) : 0;
+}
+
+bool isLibraryBookFile(const std::string_view path) {
+  // The walk skips hidden (dot-prefixed) names, so it never lists a file inside
+  // a hidden folder. A lone "." names the folder itself.
+  size_t start = 0;
+  while (start < path.size()) {
+    const size_t slash = path.find('/', start);
+    const std::string_view name = path.substr(start, slash - start);
+    if (name.size() > 1 && name.front() == '.') return false;
+    if (slash == std::string_view::npos) break;
+    start = slash + 1;
+  }
+  return FsHelpers::checkFileExtension(path, ".epub") || FsHelpers::checkFileExtension(path, ".txt") ||
+         FsHelpers::checkFileExtension(path, ".md") || FsHelpers::hasXtcExtension(path);
 }
 
 bool markLibraryIndexDirty() {

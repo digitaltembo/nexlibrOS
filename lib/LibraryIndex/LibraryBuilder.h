@@ -24,6 +24,7 @@
 
 #include <cstdint>
 #include <string>
+#include <string_view>
 
 #include "LibraryFormat.h"
 
@@ -91,5 +92,9 @@ uint32_t libraryCustomListsHash(uint8_t listOptions);
 // entry rebuilds it through the normal reconciliation path.
 bool markLibraryIndexDirty();
 bool isLibraryIndexDirty();
+
+// Whether `path` (a full path or a bare name) passes the walk's name filter: a
+// book extension, and no hidden (dot-prefixed) folder or file name.
+bool isLibraryBookFile(std::string_view path);
 
 }  // namespace library

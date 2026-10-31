@@ -83,7 +83,7 @@ class HomeActivity final : public Activity {
   void drawCardCovers();
   void freeCardCovers();
 
-  void onSelectBook(const std::string& path);
+  void onRecentBookSelected(const std::string& path);
   void onFileBrowserOpen();
   void onLibraryOpen();
   void onSettingsOpen();

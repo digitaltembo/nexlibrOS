@@ -216,7 +216,7 @@ void DictionaryWordSelectActivity::moveVertical(const int direction) {
   }
 }
 
-void DictionaryWordSelectActivity::performLookup() {
+void DictionaryWordSelectActivity::performLookup(const char* text) {
   // Dictionaries for the book's language come first (the configured default
   // leading), so the definition shown is in that language whenever one has
   // the word; the definition viewer looks it up in the rest in the background.
@@ -235,7 +235,6 @@ void DictionaryWordSelectActivity::performLookup() {
   popupMsg = dictLookup.prepare(dictionaries[0].name.c_str()) ? StrId::STR_DICT_INDEXING : StrId::STR_DICT_LOOKING_UP;
   requestUpdateAndWait();  // paint the page + busy popup before blocking on SD
 
-  const char* text = words[selected].text;
   std::string definition;
   std::string headword;
   // The first dictionary's failure is the one reported if none has the word.
@@ -306,7 +305,7 @@ StrId DictionaryWordSelectActivity::primaryAction() const {
 void DictionaryWordSelectActivity::runAction(const StrId action) {
   switch (action) {
     case StrId::STR_LOOKUP:
-      performLookup();
+      performLookup(words[selected].text);
       break;
     case StrId::STR_HIGHLIGHT:
       anchor = selected;
@@ -390,6 +389,12 @@ void DictionaryWordSelectActivity::removeHighlight(const int index) {
 }
 
 void DictionaryWordSelectActivity::loop() {
+  if (!pendingLookup.empty()) {
+    const std::string text = std::move(pendingLookup);
+    pendingLookup.clear();
+    performLookup(text.c_str());
+    return;
+  }
   if (popup == Popup::NotFound || popup == Popup::Error) {
     if (millis() - popupTime >= POPUP_DURATION_MS) {
       popup = Popup::None;

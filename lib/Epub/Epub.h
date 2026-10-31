@@ -4,6 +4,7 @@
 #include <Print.h>
 
 #include <memory>
+#include <optional>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -14,6 +15,15 @@
 class ZipFile;
 
 class Epub {
+ public:
+  struct SyncMetadata {
+    std::string isbn;
+    std::string asin;
+    std::string series;
+    std::optional<float> seriesIndex;
+  };
+
+ private:
   // the ncx file (EPUB 2)
   std::string tocNcxItem;
   // the nav file (EPUB 3)
@@ -41,6 +51,7 @@ class Epub {
                        bool metadataOnly = false, ZipFile* sharedZip = nullptr,
                        BookMetadataCache::ExtendedMetadata* extendedMetadata = nullptr);
   bool generateThumbBmpForCover(int height, const std::string& coverImageHref) const;
+  bool openProtection();
   bool parseTocNcxFile() const;
   bool parseTocNavFile() const;
   void discoverCssFilesFromZip();
@@ -53,6 +64,7 @@ class Epub {
   bool load(bool buildIfMissing = true, bool skipLoadingCss = false);
   // `extended` is optional; when given it is filled from the same cache or OPF read.
   bool loadMetadata(std::string& title, std::string& author, BookMetadataCache::ExtendedMetadata* extended = nullptr);
+  bool loadSyncMetadata(SyncMetadata& metadata);
   bool clearCache() const;
   void setupCacheDir() const;
   const std::string& getCachePath() const;
@@ -83,6 +95,8 @@ class Epub {
   int getSpineIndexForTocIndex(int tocIndex) const;
   int getTocIndexForSpineIndex(int spineIndex) const;
   size_t getCumulativeSpineItemSize(int spineIndex) const;
+  // First spine index whose cumulative size reaches `bytes`, or -1 past the end.
+  int getSpineIndexForSize(size_t bytes) const;
   int getSpineIndexForTextReference() const;
 
   size_t getBookSize() const;

@@ -18,12 +18,12 @@
 // vector-of-string layout cost ~250 throwing allocations per page load, which
 // was the primary driver of heap fragmentation on the ESP32-C3.
 //
-// Arena layout, in order (2-byte alignment holds by construction: all 16-bit
-// arrays come first and the arena base is allocator-aligned; RISC-V faults on
+// Arena layout, in order (4-byte alignment holds by construction: source ranges come first, then 16-bit
+// arrays and the arena base is allocator-aligned; RISC-V faults on
 // unaligned multi-byte access):
+//   SourceRange sourceRanges[wordCount]  chapter codepoint offsets, [start, end)
 //   uint16_t textOff[wordCount]        byte offset of word i's text in text[]
 //   int16_t  xpos[wordCount]
-//   uint16_t offDelta[wordCount]       word i's visible-text offset minus offsetBase
 //   uint16_t focusSuffixX[wordCount]   present only when focusPresent
 //   uint8_t  styles[wordCount]
 //   uint8_t  focusBoundary[wordCount]  present only when focusPresent
@@ -41,6 +41,15 @@
 // focus reading is disabled).
 class TextBlock final : public Block {
  public:
+  // The unused high bit of the cached style byte carries clipping metadata.
+  static constexpr uint8_t DISCRETIONARY_HYPHEN_FLAG = 0x80;
+  // Word font slot bit for CSS small caps; the style byte's high bit is the hyphen flag.
+  static constexpr uint8_t SMALL_CAPS_SLOT_FLAG = 0x80;
+  struct SourceRange {
+    uint32_t start = UINT32_MAX;
+    uint32_t end = UINT32_MAX;
+  };
+
   struct LinkSpan {
     char href[FOOTNOTE_HREF_LEN];
     int16_t x;
@@ -51,9 +60,8 @@ class TextBlock final : public Block {
  private:
   BlockStyle blockStyle;
   uint16_t numWords = 0;
-  uint16_t textBytes = 0;  // total size of the text region, including NULs
-  // Visible-codepoint offset (within the spine) that offDelta[] is relative to.
-  uint32_t offsetBase = 0;
+  uint16_t paragraphStartWord = UINT16_MAX;  // Visual index of the paragraph's first logical word.
+  uint16_t textBytes = 0;                    // total size of the text region, including NULs
   bool focusPresent = false;
   bool isValid = true;
   // The ONLY allocation: makeUniqueNoThrow, so OOM yields an invalid block
@@ -61,14 +69,18 @@ class TextBlock final : public Block {
   std::unique_ptr<uint8_t[]> arena;
   // Typed views into the arena, bound once after the arena is filled. All
   // 16-bit bases sit at even offsets, so direct dereference is alignment-safe.
+  const SourceRange* sourceRanges = nullptr;
   const uint16_t* textOffArr = nullptr;
   const int16_t* xposArr = nullptr;
-  const uint16_t* offDeltaArr = nullptr;
   const uint16_t* focusSuffixXArr = nullptr;  // null when !focusPresent
   const uint8_t* stylesArr = nullptr;
   const uint8_t* focusBoundaryArr = nullptr;  // null when !focusPresent
   const char* textArr = nullptr;
   std::vector<std::string> rubyTexts;
+  // Words sized apart from the line (CSS font-size spans): MAX_WORD_FONTS int32 font ids,
+  // then one slot per word (0 = block font, n = font n-1). Null when every word uses the
+  // block font, so ordinary lines pay only this pointer.
+  std::unique_ptr<uint8_t[]> wordFontData;
   // Layout-only metadata. ChapterHtmlSlimParser moves it into Page::links
   // immediately; cached TextBlocks therefore keep the same compact format.
   std::vector<LinkSpan> linkSpans;
@@ -85,13 +97,32 @@ class TextBlock final : public Block {
                      const std::vector<EpdFontFamily::Style>& wordStyles, const std::vector<uint8_t>& focusBoundary,
                      const std::vector<uint16_t>& focusSuffixX, const BlockStyle& blockStyle = BlockStyle(),
                      std::vector<std::string> rubyTexts = {}, std::vector<LinkSpan> linkSpans = {},
-                     const std::vector<uint32_t>& wordVisibleOffsets = {});
+                     const std::vector<SourceRange>& ranges = {}, uint16_t paragraphStartWord = UINT16_MAX);
   ~TextBlock() override = default;
   TextBlock(const TextBlock&) = delete;
   TextBlock& operator=(const TextBlock&) = delete;
 
   void setBlockStyle(const BlockStyle& blockStyle) { this->blockStyle = blockStyle; }
   const BlockStyle& getBlockStyle() const { return blockStyle; }
+  // The font this line was laid out in: a CSS font-size override, else the section font.
+  int blockFontId(const int sectionFontId) const { return blockStyle.fontId ? blockStyle.fontId : sectionFontId; }
+
+  static constexpr uint8_t MAX_WORD_FONTS = 3;
+  // slots[i] picks word i's font: 0 = the block font, n = fonts[n-1]; SMALL_CAPS_SLOT_FLAG
+  // marks small caps. Returns false on OOM.
+  bool setWordFonts(const uint8_t* slots, const int32_t (&fonts)[MAX_WORD_FONTS]);
+  int wordFontId(uint16_t i, int sectionFontId) const;
+  bool wordHasSmallCaps(uint16_t i) const {
+    return wordFontData && (wordFontData[sizeof(int32_t) * MAX_WORD_FONTS + i] & SMALL_CAPS_SLOT_FLAG);
+  }
+  // fontId when it is (or can be) registered with the renderer, else the section font.
+  static int renderFontId(const GfxRenderer& renderer, int fontId, int sectionFontId);
+  // Ascent of the line's shared baseline: the tallest font among its words.
+  int lineAscent(const GfxRenderer& renderer, int sectionFontId) const;
+  // Offset from the line top at which to draw word i so every word shares the baseline.
+  int wordYOffset(const GfxRenderer& renderer, int sectionFontId, uint16_t i) const;
+  // Extra height the line needs beyond its block font for taller words.
+  int extraAscent(const GfxRenderer& renderer, int sectionFontId) const;
   bool isEmpty() override { return numWords == 0; }
   bool valid() const { return isValid; }
   uint16_t wordCount() const { return numWords; }
@@ -101,11 +132,17 @@ class TextBlock final : public Block {
     const uint16_t end = (i + 1 < numWords) ? textOffArr[i + 1] : textBytes;
     return end - textOffArr[i] - 1;  // exclude the NUL
   }
-  int16_t wordXpos(const uint16_t i) const { return xposArr[i]; }
+  SourceRange wordSourceRange(const uint16_t i) const { return sourceRanges[i]; }
   // Zero-based visible-codepoint offset of word i within its spine; same basis as
-  // Page::visibleTextOffset, so it is stable across re-pagination.
-  uint32_t wordVisibleOffset(const uint16_t i) const { return offsetBase + offDeltaArr[i]; }
-  EpdFontFamily::Style wordStyle(const uint16_t i) const { return static_cast<EpdFontFamily::Style>(stylesArr[i]); }
+  // Page::visibleTextOffset, so it is stable across re-pagination. UINT32_MAX when unknown.
+  uint32_t wordVisibleOffset(const uint16_t i) const { return sourceRanges[i].start; }
+  bool wordStartsParagraph(const uint16_t i) const { return i == paragraphStartWord; }
+  int16_t wordXpos(const uint16_t i) const { return xposArr[i]; }
+  EpdFontFamily::Style wordStyle(const uint16_t i) const {
+    return static_cast<EpdFontFamily::Style>((stylesArr[i] & ~DISCRETIONARY_HYPHEN_FLAG) |
+                                             (wordHasSmallCaps(i) ? EpdFontFamily::SMALL_CAPS : 0));
+  }
+  bool wordHasDiscretionaryHyphen(const uint16_t i) const { return (stylesArr[i] & DISCRETIONARY_HYPHEN_FLAG) != 0; }
   uint8_t focusBoundary(const uint16_t i) const { return focusPresent ? focusBoundaryArr[i] : 0; }
   uint16_t focusSuffixX(const uint16_t i) const { return focusPresent ? focusSuffixXArr[i] : 0; }
   bool hasRuby() const;

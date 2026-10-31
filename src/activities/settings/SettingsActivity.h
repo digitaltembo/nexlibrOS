@@ -21,6 +21,7 @@ enum class SettingAction {
   KOReaderSync,
   OPDSBrowser,
   Network,
+  Bluetooth,
   ClearCache,
   CheckForUpdates,
   SdFirmwareUpdate,
@@ -55,6 +56,8 @@ struct SettingInfo {
   bool obfuscated = false;               // Save/load via base64 obfuscation (passwords)
   bool inTextSettings = false;           // Surfaced in the Text Settings screen; hidden from the flat Reader list
 
+  bool webHidden = false;  // Persisted normally, but omitted from the generic Web Settings API
+
   // Direct char[] string fields (for settings stored in CrossPointSettings)
   size_t stringOffset = 0;
   size_t stringMaxLen = 0;
@@ -72,6 +75,11 @@ struct SettingInfo {
 
   SettingInfo& withTextSettings() {
     inTextSettings = true;
+    return *this;
+  }
+
+  SettingInfo& withWebHidden() {
+    webHidden = true;
     return *this;
   }
 

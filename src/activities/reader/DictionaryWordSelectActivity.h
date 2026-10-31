@@ -54,6 +54,9 @@ class DictionaryWordSelectActivity final : public Activity {
   // Pre-selects the word under a screen point (the reader's long-press) before
   // the activity starts. False when no word is there.
   bool selectWordAt(int x, int y);
+  // Looks up `text` (e.g. a multi-word clip selection) as soon as the activity
+  // starts, instead of waiting for a word to be chosen.
+  void lookUpOnEnter(std::string text) { pendingLookup = std::move(text); }
 
   void onEnter() override;
   void loop() override;
@@ -109,7 +112,7 @@ class DictionaryWordSelectActivity final : public Activity {
   int closestInRow(uint16_t row, int centerX) const;
   int wordAt(int x, int y) const;
   void moveVertical(int direction);
-  void performLookup();
+  void performLookup(const char* text);
   bool drawHighlightWithSnapshot();
   void drawSelection(int lo, int hi) const;
   Bubble lookupBubble() const;
@@ -150,6 +153,7 @@ class DictionaryWordSelectActivity final : public Activity {
   int anchor = -1;
   bool wordsReady = false;
   bool preselected = false;
+  std::string pendingLookup;  // see lookUpOnEnter()
   // Touch boards show a tappable bubble over the cursor.
   const bool showBubble = BoardConfig::hasTouch();
   LuaLookupHook lookupHooks[MAX_LOOKUP_HOOKS] = {};

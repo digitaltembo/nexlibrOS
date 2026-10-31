@@ -121,6 +121,41 @@ MetaProperty metaPropertyFrom(const char* property) {
   if (strcmp(property, "schema:genre") == 0) return MetaProperty::Genre;
   return MetaProperty::None;
 }
+
+std::string lowerAscii(std::string value) {
+  for (char& c : value) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+  return value;
+}
+
+std::string boundedMetadataValue(const XML_Char* value) {
+  if (!value) return {};
+  size_t length = 0;
+  while (length < MAX_METADATA_TEXT && value[length] != '\0') ++length;
+  return std::string(value, length);
+}
+
+bool hasMetadataPrefix(const std::string& value, const char* prefix) {
+  const std::string lower = lowerAscii(value);
+  const std::string wanted = lowerAscii(prefix);
+  return lower.rfind(wanted, 0) == 0 || lower.rfind("urn:" + wanted + ":", 0) == 0;
+}
+
+std::string stripMetadataPrefix(const std::string& value, const char* prefix) {
+  const std::string lower = lowerAscii(value);
+  const std::string wanted = lowerAscii(prefix);
+  size_t offset = 0;
+  const std::string urnPrefix = "urn:" + wanted + ":";
+  if (lower.rfind(urnPrefix, 0) == 0) {
+    offset = urnPrefix.size();
+  } else if (lower.rfind(wanted, 0) == 0) {
+    offset = wanted.size();
+  } else {
+    return value;
+  }
+  while (offset < value.size() && (value[offset] == ':' || value[offset] == ' ' || value[offset] == '	')) ++offset;
+  return value.substr(offset);
+}
+
 }  // namespace
 
 struct ContentOpfParser::ExtendedState {
@@ -270,8 +305,6 @@ size_t ContentOpfParser::write(const uint8_t* buffer, const size_t size) {
 
 void XMLCALL ContentOpfParser::startElement(void* userData, const XML_Char* name, const XML_Char** atts) {
   auto* self = static_cast<ContentOpfParser*>(userData);
-  (void)atts;
-
   if (self->metadataOnly && self->metadataComplete) {
     return;
   }
@@ -340,6 +373,17 @@ void XMLCALL ContentOpfParser::startElement(void* userData, const XML_Char* name
   if (self->state == IN_METADATA && xmlLocalNameEquals(name, "language")) {
     self->state = IN_BOOK_LANGUAGE;
     self->metadataSpacePending = false;
+    return;
+  }
+
+  if (self->state == IN_METADATA && xmlLocalNameEquals(name, "identifier")) {
+    self->state = IN_BOOK_IDENTIFIER;
+    self->identifierText.clear();
+    self->identifierScheme.clear();
+    self->metadataSpacePending = false;
+    for (int i = 0; atts[i]; i += 2) {
+      if (xmlLocalNameEquals(atts[i], "scheme")) self->identifierScheme = boundedMetadataValue(atts[i + 1]);
+    }
     return;
   }
 
@@ -618,6 +662,11 @@ void XMLCALL ContentOpfParser::characterData(void* userData, const XML_Char* s, 
     appendMetadataText(self->ext->text, s, len, self->ext->textSpacePending);
     return;
   }
+
+  if (self->state == IN_BOOK_IDENTIFIER) {
+    appendMetadataText(self->identifierText, s, len, self->metadataSpacePending);
+    return;
+  }
 }
 
 void XMLCALL ContentOpfParser::endElement(void* userData, const XML_Char* name) {
@@ -657,6 +706,20 @@ void XMLCALL ContentOpfParser::endElement(void* userData, const XML_Char* name) 
   }
 
   if (self->state == IN_BOOK_LANGUAGE && xmlLocalNameEquals(name, "language")) {
+    self->state = IN_METADATA;
+    return;
+  }
+
+  if (self->state == IN_BOOK_IDENTIFIER && xmlLocalNameEquals(name, "identifier")) {
+    const std::string scheme = lowerAscii(self->identifierScheme);
+    if (self->isbn.empty() &&
+        (scheme.find("isbn") != std::string::npos || hasMetadataPrefix(self->identifierText, "isbn"))) {
+      self->isbn = stripMetadataPrefix(self->identifierText, "isbn");
+    }
+    if (self->asin.empty() && (scheme.find("asin") != std::string::npos || scheme == "amazon" ||
+                               hasMetadataPrefix(self->identifierText, "asin"))) {
+      self->asin = stripMetadataPrefix(self->identifierText, "asin");
+    }
     self->state = IN_METADATA;
     return;
   }

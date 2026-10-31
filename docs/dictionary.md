@@ -1,6 +1,6 @@
 # Dictionary
 
-Look up words while reading an EPUB using an offline StarDict dictionary stored on the SD card.
+Look up words and phrases while reading an EPUB using an offline StarDict dictionary stored on the SD card.
 
 ## Supported Format
 
@@ -38,7 +38,7 @@ Every installed dictionary is still searched, but those whose tag matches the bo
 
 Dictionaries without a `lang=` tag (or without an `.ifo`) count as matching every book, and so does every dictionary for a book without language metadata. The dictionary selected in **Settings → Reader → Dictionary** is the default: it leads the matching dictionaries when it serves the book's language, and leads the others when it does not.
 
-## Looking Up a Word
+## Looking Up Words and Phrases
 
 Two ways to start a lookup while reading:
 
@@ -50,6 +50,8 @@ One word on the page becomes highlighted:
 1. Use **Left/Right** to move between words in reading order, and the side **Up/Down** buttons to jump between lines.
 2. Press **Confirm** to look up the highlighted word.
 3. Press **Back** to return to the reader.
+
+To look up a phrase, choose **Create Clipping** from the reader menu, select the words, then choose **Look Up**.
 
 On touch devices (X4 Pro and other touchscreen readers), long-press a word on the reading page to select it. A bubble above the word offers:
 
@@ -63,7 +65,7 @@ On the very first lookup with a dictionary (and again whenever the `.idx` or `.s
 
 ### How Lookup Works
 
-1. **Direct match** — the word is found as-is (case-insensitive) in the dictionary index. Surrounding punctuation is ignored. When the dictionary has several entries for the same headword (common in dictionaries converted from Kindle/mobi files, which give each sense or part of speech its own entry — e.g. Spanish *perro* the adjective and *perro* the noun), all of them are shown, one after another, separated by a rule.
+1. **Direct match** — the word or phrase is searched as-is (case-insensitive) in the dictionary index. Leading and trailing punctuation and whitespace are stripped automatically. Multi-word phrases match dictionary entries containing spaces (such as idioms, phrasal verbs, or compound terms). When the dictionary has several entries for the same headword (common in dictionaries converted from Kindle/mobi files, which give each sense or part of speech its own entry — e.g. Spanish *perro* the adjective and *perro* the noun), all of them are shown, one after another, separated by a rule.
 2. **Synonyms** — on a miss, if the dictionary ships a `.syn` file, alternate spellings and irregular forms recorded there are resolved to their headword (e.g. `oxen` → `ox`, `colour` → `color`). This step is skipped if the `.sidx` sidecar could not be built (e.g. transient low memory during indexing); the dictionary otherwise stays usable, and the build is retried the next time it is opened.
 3. **Stemming** — still no match: common English word forms are retried automatically: possessives and plurals (`dogs` → `dog`, `stories` → `story`) and verb endings (`walked` → `walk`, `running` → `run`, `making` → `make`).
 4. **Other dictionaries** — if the default dictionary still has no match, the other dictionaries are tried in turn (steps 1–3 each), those for the book's language first, and the first one with the word is shown.
@@ -73,7 +75,9 @@ On the very first lookup with a dictionary (and again whenever the `.idx` or `.s
 
 When a word is found, the definition screen shows the matched headword at the top and the definition text below, with a page counter for long definitions.
 
-HTML dictionaries that declare `sametypesequence=h` use the EPUB text-layout engine for semantic formatting such as headings, bold, italics, lists, and line breaks. Images and CSS styling are ignored. Definitions that are too large or cannot be laid out within the available memory fall back to plain text.
+HTML dictionaries (`sametypesequence=h`) and XDXF dictionaries (`sametypesequence=x`) use the EPUB text-layout engine for supported formatting such as headings, bold, italics, lists, and line breaks. Unrecognized tags keep their text without special formatting. Images and CSS styling are ignored. Definitions that are too large or cannot be parsed or laid out within the available memory fall back to plain text.
+
+Definitions are drawn in your reading font. Dictionaries may use IPA symbols (e.g. `ˈ ː ɹ ɪ ʊ`…) as pronunciation guide, which built-in reader fonts do not include, so they are shown as `�`. To see them, install an [SD card font](./sd-card-fonts.md) that covers IPA and select it as the reading font.
 
 When more than one dictionary is installed, a row of tabs sits under the headword. The definition is shown first from your default dictionary, or otherwise the first dictionary with the word, preferring the book's language, and its tab is selected. While you read it, the word is looked up in the remaining dictionaries in the background (a `...` placeholder marks the search in progress), and a tab appears for each dictionary that has the word. Dictionaries without it get no tab. The results are already loaded, so switching tabs displays them immediately (only unusually long definitions, beyond what fits in memory alongside the others, are re-read when their tab is chosen); your default dictionary setting is unchanged. Tabs are labelled with the dictionary folder names, so short folder names read best.
 
@@ -81,7 +85,6 @@ When more than one dictionary is installed, a row of tabs sits under the headwor
 - **Confirm** — switch to the next dictionary tab
 - **Back** (or the header's back arrow on touch devices) — return to the book
 - Touch: tap a tab to switch dictionaries; tap the left third of the screen for the previous page, elsewhere for the next
-
 
 
 ## Where to find dictionaries

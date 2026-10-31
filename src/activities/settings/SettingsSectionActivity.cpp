@@ -1,5 +1,6 @@
 #include "SettingsSectionActivity.h"
 
+#include <BlePageTurner.h>
 #include <BoardConfig.h>
 #include <GfxRenderer.h>
 #include <HalClock.h>
@@ -13,6 +14,7 @@
 #include <cstring>
 
 #include "AboutActivity.h"
+#include "BleSettingsActivity.h"
 #include "ButtonRemapActivity.h"
 #include "ClearCacheActivity.h"
 #include "ClockSettingsActivity.h"
@@ -33,12 +35,12 @@
 #include "StatusBarSettingsActivity.h"
 #include "TextSettingsActivity.h"
 #include "activities/network/WifiSelectionActivity.h"
-#include "activities/plugins/PluginCatalogActivity.h"
 #include "activities/util/IntervalSelectionActivity.h"
 #include "components/UITheme.h"
 #include "components/UIThemeTokens.h"
 #include "components/UiAppHelpers.h"
 #include "fontIds.h"
+#include "util/PluginEvents.h"
 
 namespace fui = freeink::ui;
 
@@ -60,7 +62,9 @@ bool showOnDevice(const SettingInfo& setting) {
   }
   // Merged into the Text Settings screen.
   if (setting.category == StrId::STR_CAT_READER && setting.inTextSettings) return false;
-  if (BoardConfig::hasHomeKey() && setting.valuePtr == &CrossPointSettings::longPressMenuFunction) return false;
+  // Touch boards act on the text directly; the X4 Pro home key and the
+  // short power click on other touch boards carry the remaining shortcuts.
+  if (BoardConfig::hasTouch() && setting.valuePtr == &CrossPointSettings::longPressMenuFunction) return false;
   if (setting.valuePtr == &CrossPointSettings::pwrBtnFootnoteBack &&
       SETTINGS.shortPwrBtn != CrossPointSettings::SHORT_PWRBTN::FOOTNOTES) {
     return false;
@@ -92,7 +96,7 @@ SettingsSection sectionFor(const SettingInfo& setting) {
 }
 
 // Device-only action rows added per section, beyond the shared list.
-constexpr size_t EXTRA_ROWS_PER_SECTION = 4;
+constexpr size_t EXTRA_ROWS_PER_SECTION = 5;
 }  // namespace
 
 void buildSettingsSections(SettingsBySection& out) {
@@ -149,13 +153,20 @@ void buildSettingsSections(SettingsBySection& out) {
   library.push_back(SettingInfo::Action(StrId::STR_CLEAR_READING_CACHE, SettingAction::ClearCache));
 
   network.push_back(SettingInfo::Action(StrId::STR_WIFI_NETWORKS, SettingAction::Network));
+  if (bleturner::status().compiledIn) {
+    network.push_back(SettingInfo::Action(StrId::STR_BT_PAGE_TURNER, SettingAction::Bluetooth));
+  }
   network.push_back(SettingInfo::Action(StrId::STR_KOREADER_SYNC, SettingAction::KOReaderSync));
   network.push_back(SettingInfo::Action(StrId::STR_OPDS_SERVERS, SettingAction::OPDSBrowser));
 
   // OTA fetches this board's own release asset (see OtaUpdater); boards whose
-  // asset isn't published yet just report no update available.
-  system.push_back(SettingInfo::Action(StrId::STR_CHECK_UPDATES, SettingAction::CheckForUpdates));
-  system.push_back(SettingInfo::Action(StrId::STR_SD_FIRMWARE_UPDATE, SettingAction::SdFirmwareUpdate));
+  // asset isn't published yet just report no update available. The Picco's
+  // stock layout has one app slot (partitions_picco.csv), so it cannot update
+  // itself either way.
+  if (!BoardConfig::isPicco()) {
+    system.push_back(SettingInfo::Action(StrId::STR_CHECK_UPDATES, SettingAction::CheckForUpdates));
+    system.push_back(SettingInfo::Action(StrId::STR_SD_FIRMWARE_UPDATE, SettingAction::SdFirmwareUpdate));
+  }
   system.push_back(SettingInfo::Action(StrId::STR_PLUGINS, SettingAction::Plugins));
   system.push_back(SettingInfo::Action(StrId::STR_ABOUT, SettingAction::About));
 }
@@ -351,6 +362,15 @@ void SettingsSectionActivity::toggleSelectedSetting() {
         });
         break;
       }
+      case SettingAction::Bluetooth: {
+        auto activity = makeUniqueNoThrow<BleSettingsActivity>(renderer, mappedInput);
+        if (!activity) {
+          LOG_ERR("SETTINGS", "OOM: BleSettingsActivity");
+          return;
+        }
+        startActivityForResult(std::move(activity), resultHandler);
+        break;
+      }
       case SettingAction::LibrarySettings: {
         auto activity = makeUniqueNoThrow<LibrarySettingsActivity>(renderer, mappedInput);
         if (!activity) {
@@ -395,9 +415,21 @@ void SettingsSectionActivity::toggleSelectedSetting() {
                                  rebuildSettings();
                                });
         break;
-      case SettingAction::Plugins:
-        startActivityForResult(std::make_unique<PluginCatalogActivity>(renderer, mappedInput), resultHandler);
-        break;
+      case SettingAction::Plugins: {
+        static constexpr StrId OPTIONS[] = {StrId::STR_ENABLED, StrId::STR_DISABLED, StrId::STR_CANCEL};
+        optionPopup.show(StrId::STR_PLUGINS, OPTIONS, 3, SETTINGS.pluginsEnabled ? 0 : 1, [this](const int idx) {
+          if (idx == 2) return;
+          SETTINGS.pluginsEnabled = idx == 0 ? 1 : 0;
+          // Turning plugins on brings back a dismissed Plugin Hub install row.
+          if (SETTINGS.pluginsEnabled) SETTINGS.pluginHubPromptHidden = 0;
+          SETTINGS.saveToFile();
+          // Applies to event delivery now, not after a reboot.
+          pluginevents::refreshSubscriptions();
+          rebuildSettings();
+        });
+        requestUpdate();
+        return;
+      }
       case SettingAction::KeyboardLayouts:
         if (auto activity = makeUniqueNoThrow<KeyboardLayoutsActivity>(renderer, mappedInput)) {
           startActivityForResult(std::move(activity), nullptr);
@@ -473,6 +505,7 @@ std::string SettingsSectionActivity::settingValueText(const SettingInfo& setting
   if (setting.action == SettingAction::HomeButton || setting.action == SettingAction::LibrarySettings) {
     return tr(STR_CONFIGURE);
   }
+  if (setting.action == SettingAction::Plugins) return SETTINGS.pluginsEnabled ? tr(STR_ENABLED) : tr(STR_DISABLED);
   if (setting.type == SettingType::ENUM && setting.valuePtr != nullptr) {
     // Guard like the valueGetter branch below: a corrupt/migrated settings
     // byte must not index past the enum table.
@@ -539,11 +572,9 @@ void SettingsSectionActivity::buildScreen(UiScreen& screen) {
   props.action = ACTION_ROW;
   props.inputMask = fui::InputTouch;  // physical buttons stay in loop()
   props.valueInset = 8;               // air between the value and the row edge
-  // Titles match the value's font size (smallText) so both sides of a row
-  // read as one unit; labels that still don't fit wrap onto a second line.
-  // maxLines=2 also marks the style explicitly set (an all-default smallText
-  // fails textStyleUnset and the list would substitute bodyText back).
-  props.labelText = screen.theme().smallText;
+  // Touch uses the standard list sizing, as in Bluetooth; buttons keep compact labels.
+  // maxLines also marks smallText as explicit so the list does not replace it with bodyText.
+  props.labelText = mappedInput.hasTouch() ? screen.theme().bodyText : screen.theme().smallText;
   props.labelText.maxLines = 2;
   syncListViewport(screen, props);
   screen.list(props);

@@ -1,9 +1,12 @@
 #include <gtest/gtest.h>
 
 #include <fstream>
+#include <iterator>
 #include <string>
 
+#include "Opds2Parser.h"
 #include "OpdsParser.h"
+#include "OpdsPublicationDoc.h"
 
 bool operator==(const OpdsEntry& lhs, const OpdsEntry& rhs) {
   return lhs.author == rhs.author && lhs.href == rhs.href && lhs.id == rhs.id && lhs.title == rhs.title &&
@@ -17,11 +20,15 @@ void PrintTo(const OpdsEntry& e, std::ostream* os) {
 
 namespace {
 
+// The firmware's device preferences, as set by OpdsBookBrowserActivity.
+const char* const X4_EPUB_VARIANTS[] = {".x4.epub", ".x3.epub"};
+const char* const X3_EPUB_VARIANTS[] = {".x3.epub", ".x4.epub"};
+
 /// @brief Defines both a file path and the properties an OpdsParser should have after parsing that path
 struct TestFile {
   std::string filename;
-  /// @brief If specified, prioritize the provided download format for books
-  const char* preferred_format = nullptr;
+  /// @brief Optimized EPUB variants to prefer, best first (none when null)
+  const char* const* preferred_variants = nullptr;
   bool error = false;
   std::string search_template = "";
   std::string next_page_url = "";
@@ -49,6 +56,7 @@ struct TestFile testFiles[] = {
     },
     {
         .filename = "test_download_priorities.xml",
+        .preferred_variants = X4_EPUB_VARIANTS,
         .books =
             {
                 {.type = OpdsEntryType::BOOK, .title = "onlybook", .href = "onlybook"},
@@ -62,7 +70,7 @@ struct TestFile testFiles[] = {
     },
     {
         .filename = "test_device_download_priorities.xml",
-        .preferred_format = OpdsParser::X3_EPUB_EXT,
+        .preferred_variants = X3_EPUB_VARIANTS,
         .books =
             {
                 {.type = OpdsEntryType::BOOK, .title = "Device-specific preferences 1", .href = "a.x3.epub"},
@@ -71,7 +79,7 @@ struct TestFile testFiles[] = {
     },
     {
         .filename = "test_device_download_priorities.xml",
-        .preferred_format = OpdsParser::X4_EPUB_EXT,
+        .preferred_variants = X4_EPUB_VARIANTS,
         .books =
             {
                 {.type = OpdsEntryType::BOOK, .title = "Device-specific preferences 1", .href = "b.x4.epub"},
@@ -87,11 +95,8 @@ class OpdsParserTestFixture : public testing::TestWithParam<TestFile> {
   void SetUp() override {
     const TestFile p = GetParam();
 
-    if (p.preferred_format != nullptr) {
-      parser = new OpdsParser(GetParam().preferred_format);
-    } else {
-      parser = new OpdsParser();
-    }
+    opdsSetPreferredEpubVariants(p.preferred_variants, std::size(X4_EPUB_VARIANTS));
+    parser = new OpdsParser();
 
     std::string filepath = std::string(TEST_DATA_DIR) + p.filename;
     std::ifstream file(filepath, std::ios::binary | std::ios::ate);
@@ -116,7 +121,10 @@ class OpdsParserTestFixture : public testing::TestWithParam<TestFile> {
     delete[] buffer;
   }
 
-  void TearDown() override { delete parser; }
+  void TearDown() override {
+    delete parser;
+    opdsSetPreferredEpubVariants(nullptr, 0);
+  }
 };
 
 TEST_P(OpdsParserTestFixture, VerifyTestFiles) {
@@ -144,5 +152,64 @@ INSTANTIATE_TEST_SUITE_P(OpdsParserTest, OpdsParserTestFixture, testing::ValuesI
                               << info.param.filename.substr(0, info.param.filename.find_first_of("."));
                            return ss.str();
                          });
+
+TEST(OpdsDownloadPriority, PlainEpubWinsWithoutDevicePreference) {
+  opdsSetPreferredEpubVariants(nullptr, 0);
+  const std::string xml = R"(<feed xmlns="http://www.w3.org/2005/Atom"><entry><title>t</title>
+    <link rel="http://opds-spec.org/acquisition" href="a.epub" type="application/epub+zip"/>
+    <link rel="http://opds-spec.org/acquisition" href="a.x4.epub" type="application/epub+zip"/>
+  </entry></feed>)";
+  OpdsParser parser;
+  parser.write(reinterpret_cast<const uint8_t*>(xml.data()), xml.size());
+  parser.flush();
+  ASSERT_EQ(parser.getBooks().size(), 1u);
+  EXPECT_EQ(parser.getBooks()[0].href, "a.epub");
+}
+
+TEST(OpdsDownloadPriority, AcquisitionRankBeatsOptimizedFormat) {
+  opdsSetPreferredEpubVariants(X4_EPUB_VARIANTS, std::size(X4_EPUB_VARIANTS));
+  const std::string xml = R"(<feed xmlns="http://www.w3.org/2005/Atom"><entry><title>t</title>
+    <link rel="http://opds-spec.org/acquisition/borrow" href="a.x4.epub" type="application/epub+zip"/>
+    <link rel="http://opds-spec.org/acquisition/open-access" href="a.epub" type="application/epub+zip"/>
+  </entry></feed>)";
+  OpdsParser parser;
+  parser.write(reinterpret_cast<const uint8_t*>(xml.data()), xml.size());
+  parser.flush();
+  opdsSetPreferredEpubVariants(nullptr, 0);
+  ASSERT_EQ(parser.getBooks().size(), 1u);
+  EXPECT_EQ(parser.getBooks()[0].href, "a.epub");
+}
+
+TEST(OpdsDownloadPriority, Opds2FeedPrefersDeviceOptimizedEpub) {
+  opdsSetPreferredEpubVariants(X3_EPUB_VARIANTS, std::size(X3_EPUB_VARIANTS));
+  const std::string json = R"({"metadata":{"title":"f"},"publications":[{"metadata":{"title":"t"},"links":[
+    {"rel":"http://opds-spec.org/acquisition","href":"a.epub","type":"application/epub+zip"},
+    {"rel":"http://opds-spec.org/acquisition","href":"a.x4.epub","type":"application/epub+zip"},
+    {"rel":"http://opds-spec.org/acquisition","href":"a.x3.epub","type":"application/epub+zip"},
+    {"rel":"http://opds-spec.org/acquisition","href":"b.epub","type":"application/epub+zip"}]}]})";
+  Opds2Parser parser;
+  parser.write(reinterpret_cast<const uint8_t*>(json.data()), json.size());
+  parser.flush();
+  opdsSetPreferredEpubVariants(nullptr, 0);
+  ASSERT_FALSE(parser.error());
+  ASSERT_EQ(parser.getEntries().size(), 1u);
+  EXPECT_EQ(parser.getEntries()[0].href, "a.x3.epub");
+}
+
+TEST(OpdsDownloadPriority, PublicationDocPrefersDeviceOptimizedEpub) {
+  opdsSetPreferredEpubVariants(X4_EPUB_VARIANTS, std::size(X4_EPUB_VARIANTS));
+  const std::string json = R"({"metadata":{"title":"t"},"links":[
+    {"rel":"http://opds-spec.org/acquisition","href":"a.epub","type":"application/epub+zip"},
+    {"rel":"http://opds-spec.org/acquisition","href":"a.x3.epub","type":"application/epub+zip"},
+    {"rel":"http://opds-spec.org/acquisition","href":"a.x4.epub","type":"application/epub+zip"}]})";
+  std::string href;
+  bool isEpub = false;
+  ASSERT_TRUE(resolveOpdsIndirectAcquisition(json.data(), json.size(), href, isEpub));
+  EXPECT_EQ(href, "a.x4.epub");
+  OpdsPublication publication;
+  ASSERT_TRUE(parseOpdsPublicationDoc(json.data(), json.size(), publication));
+  opdsSetPreferredEpubVariants(nullptr, 0);
+  EXPECT_EQ(publication.acquisitionHref, "a.x4.epub");
+}
 
 }  // namespace
