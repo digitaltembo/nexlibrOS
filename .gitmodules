@@ -1,6 +1,6 @@
 [submodule "freeink-sdk"]
 	path = freeink-sdk
-	url = https://github.com/Free-Ink/freeink-sdk.git
+	url =  git@github.com:digitaltembo/freeink-sdk.git
 	branch = main
 [submodule "esp32sim"]
 	path = esp32sim
