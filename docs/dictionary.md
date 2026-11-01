@@ -81,10 +81,10 @@ Definitions are drawn in your reading font. Dictionaries may use IPA symbols (e.
 
 When more than one dictionary is installed, a row of tabs sits under the headword. The definition is shown first from your default dictionary, or otherwise the first dictionary with the word, preferring the book's language, and its tab is selected. While you read it, the word is looked up in the remaining dictionaries in the background (a `...` placeholder marks the search in progress), and a tab appears for each dictionary that has the word. Dictionaries without it get no tab. The results are already loaded, so switching tabs displays them immediately (only unusually long definitions, beyond what fits in memory alongside the others, are re-read when their tab is chosen); your default dictionary setting is unchanged. Tabs are labelled with the dictionary folder names, so short folder names read best.
 
-- **Left/Right** or side **Up/Down** — previous / next page
+- **Left/Right** or side **Up/Down** — previous / next page. A new press past the last page moves to the next dictionary tab, and a new press before the first page moves to the last page of the previous tab. Holding the button only pages. Neither wraps around.
 - **Confirm** — switch to the next dictionary tab
 - **Back** (or the header's back arrow on touch devices) — return to the book
-- Touch: tap a tab to switch dictionaries; tap the left third of the screen for the previous page, elsewhere for the next
+- Touch: tap a tab to switch dictionaries; tap the left third of the screen for the previous page or tab, elsewhere for the next
 
 
 ## Where to find dictionaries

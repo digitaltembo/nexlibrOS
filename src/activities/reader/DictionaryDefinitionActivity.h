@@ -92,6 +92,12 @@ class DictionaryDefinitionActivity final : public Activity {
   // tabs arriving from the background never reflow the visible definition.
   bool showTabs() const { return tabBand; }
   bool searching() const { return bgCollected < bgSlots.size(); }
+  bool nextPage();
+  // Next page, or the next tab from the last page.
+  void nextPageOrTab();
+  bool previousPage();
+  // Previous page, or the last page of the previous tab from the first page.
+  void previousPageOrTab();
   // Tabs plus a trailing "..." placeholder while lookups are still running.
   int slotCount() const { return static_cast<int>(tabs.size()) + (searching() ? 1 : 0); }
   const char* slotLabel(int index) const;
@@ -103,7 +109,7 @@ class DictionaryDefinitionActivity final : public Activity {
   int tabAt(int x, int y) const;
   // Y of the first body line, below the header and any tab band.
   int bodyTop() const;
-  void switchTab(int index);
+  void switchTab(int index, bool atLastPage = false);
   void showTab(int index);
   void layoutDefinition();
   void clearContent();
@@ -135,6 +141,8 @@ class DictionaryDefinitionActivity final : public Activity {
   // Unretained tab chosen while the task runs: shown once it has finished, so
   // two lookups never compete for the heap or the shared dictzip temp file.
   int deferredTab = -1;
+  // Consumed by the next layoutDefinition().
+  bool openOnLastPage = false;
 
   // Background lookups, one slot per remaining dictionary. The task fills
   // slot i, then publishes it by raising bgPublished past i; from then on only

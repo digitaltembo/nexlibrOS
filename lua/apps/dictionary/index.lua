@@ -5,11 +5,13 @@
 -- /dictionaries (the ones the reader uses; see docs/dictionary.md).
 --
 -- Home: Confirm looks up a new word or the selected recent word.
--- Definition: Up/Down page, Left/Right switch between the dictionaries that
--- have the word, Confirm starts a new search, Back returns home.
--- Touch: swipe up/down (or tap the right/left half) to page, swipe left/right
--- to switch dictionaries, tap the title to go home; long-press for a new
--- search. On the home screen, swipe up/down to scroll the recent words.
+-- Definition: Right/Down move to the next page, then the next dictionary that
+-- has the word; Left/Up do the opposite. Confirm starts a new search, Back
+-- returns home.
+-- Touch: swipe up/down (or tap the right/left half) as Next/Previous, swipe
+-- left/right to switch dictionaries directly, tap the title to go home;
+-- long-press for a new search. On the home screen, swipe up/down to scroll the
+-- recent words.
 
 local listview = require("listview")
 
@@ -29,6 +31,7 @@ local pending = nil -- word to look up on the next tick, after "Looking up..." i
 local message = nil
 local header_bottom = 0
 local page_lines = 1
+local hints_height = 0
 
 -- Dictionaries and history ----------------------------------------------------
 
@@ -213,12 +216,17 @@ local function header_height()
   return height + gfx.line_height() + 6
 end
 
-local function draw_result(bottom)
-  local hit = result.hits[result.index]
+local function measure_page(bottom)
   local body_top = header_height() + 10
   gfx.font(BODY_FONT)
   local lh = gfx.line_height()
   page_lines = math.max(1, (bottom - body_top) // lh)
+  return body_top, lh
+end
+
+local function draw_result(bottom)
+  local hit = result.hits[result.index]
+  local body_top, lh = measure_page(bottom)
   local count = #result.lines
   local pages = math.max(1, (count + page_lines - 1) // page_lines)
   local page_no = (result.top - 1) // page_lines + 1
@@ -234,10 +242,13 @@ local function draw_result(bottom)
 end
 
 function draw()
-  local more = result and #result.hits > 1
-  local hints_height
   if result then
-    hints_height = gfx.hints("Home", "Search", more and "Prev" or nil, more and "Next" or nil)
+    -- The Next hint needs the page size, which needs the hint bar's height.
+    -- That height never changes, so the last frame's value is good here.
+    measure_page(gfx.height() - hints_height - 8)
+    local has_prev = result.index > 1 or result.top > 1
+    local has_next = result.index < #result.hits or result.top + page_lines <= #result.lines
+    hints_height = gfx.hints("Home", "Search", has_prev and "Prev" or nil, has_next and "Next" or nil)
   else
     hints_height = gfx.hints("Exit", #dicts > 0 and "Look up" or nil, nil, nil)
   end
@@ -250,14 +261,25 @@ end
 local function page(direction)
   local count = #result.lines
   local top = result.top + direction * page_lines
-  if top < 1 or top > count then return end
+  if top < 1 or top > count then return false end
   result.top = top
+  return true
 end
 
 local function switch_hit(delta)
   local n = #result.hits
   if n < 2 then return end
   show_hit((result.index - 1 + delta) % n + 1)
+end
+
+local function next_page_or_hit()
+  if not page(1) and result.index < #result.hits then show_hit(result.index + 1) end
+end
+
+local function previous_page_or_hit()
+  if page(-1) or result.index <= 1 then return end
+  show_hit(result.index - 1)
+  result.top = math.max(#result.lines - 1, 0) // page_lines * page_lines + 1
 end
 
 local function activate_home(row)
@@ -285,10 +307,10 @@ function on_button(button)
   end
 
   if result then
-    if button == "up" then page(-1)
-    elseif button == "down" then page(1)
-    elseif button == "left" then switch_hit(-1)
-    elseif button == "right" then switch_hit(1)
+    if button == "up" then previous_page_or_hit()
+    elseif button == "down" then next_page_or_hit()
+    elseif button == "left" then previous_page_or_hit()
+    elseif button == "right" then next_page_or_hit()
     elseif button == "confirm" then prompt(result.word) end
   else
     message = nil
@@ -302,8 +324,8 @@ end
 function on_swipe(direction)
   if pending then return end
   if result then
-    if direction == "up" then page(1)
-    elseif direction == "down" then page(-1)
+    if direction == "up" then next_page_or_hit()
+    elseif direction == "down" then previous_page_or_hit()
     elseif direction == "left" then switch_hit(1)
     elseif direction == "right" then switch_hit(-1) end
   else
@@ -322,7 +344,7 @@ function on_touch(x, y, kind)
     elseif kind == "long" then
       prompt(result.word)
     else
-      page(x < gfx.width() // 2 and -1 or 1)
+      if x < gfx.width() // 2 then previous_page_or_hit() else next_page_or_hit() end
     end
   else
     message = nil

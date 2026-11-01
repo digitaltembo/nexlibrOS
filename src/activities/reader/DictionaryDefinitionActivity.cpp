@@ -178,6 +178,8 @@ void DictionaryDefinitionActivity::layoutDefinition() {
     definition = htmlToPlainText(definition);
     wrapText();
   }
+  if (openOnLastPage) currentPage = totalPages - 1;
+  openOnLastPage = false;
 }
 
 void DictionaryDefinitionActivity::clearContent() {
@@ -189,8 +191,9 @@ void DictionaryDefinitionActivity::clearContent() {
   totalPages = 1;
 }
 
-void DictionaryDefinitionActivity::switchTab(const int index) {
+void DictionaryDefinitionActivity::switchTab(const int index, const bool atLastPage) {
   if (index == activeTab || index < 0 || index >= static_cast<int>(tabs.size())) return;
+  openOnLastPage = atLastPage;
   showTab(index);
 }
 
@@ -486,6 +489,31 @@ void DictionaryDefinitionActivity::wrapText() {
   currentPage = 0;
 }
 
+bool DictionaryDefinitionActivity::nextPage() {
+  if (currentPage + 1 >= totalPages) return false;
+  currentPage++;
+  requestUpdate();
+  return true;
+}
+
+void DictionaryDefinitionActivity::nextPageOrTab() {
+  // While a tab loads it has no pages yet, so this would skip past it.
+  if (busy) return;
+  if (!nextPage()) switchTab(activeTab + 1);
+}
+
+bool DictionaryDefinitionActivity::previousPage() {
+  if (currentPage <= 0) return false;
+  currentPage--;
+  requestUpdate();
+  return true;
+}
+
+void DictionaryDefinitionActivity::previousPageOrTab() {
+  if (busy) return;
+  if (!previousPage()) switchTab(activeTab - 1, true);
+}
+
 void DictionaryDefinitionActivity::loop() {
   if (collectBackgroundResults()) requestUpdate();
   if (deferredTab >= 0 && !bgTask) {
@@ -513,30 +541,19 @@ void DictionaryDefinitionActivity::loop() {
     if (tab >= 0) {
       switchTab(tab);
     } else if (tx < renderer.getScreenWidth() / 3) {
-      if (currentPage > 0) {
-        currentPage--;
-        requestUpdate();
-      }
-    } else if (currentPage + 1 < totalPages) {
-      currentPage++;
-      requestUpdate();
+      previousPageOrTab();
+    } else {
+      nextPageOrTab();
     }
     return;
   }
 
-  buttonNavigator.onNext([this] {
-    if (currentPage + 1 < totalPages) {
-      currentPage++;
-      requestUpdate();
-    }
-  });
+  // Holding only pages, so it cannot run on through the other dictionaries.
+  buttonNavigator.onNextPress([this] { nextPageOrTab(); });
+  buttonNavigator.onNextContinuous([this] { nextPage(); });
 
-  buttonNavigator.onPrevious([this] {
-    if (currentPage > 0) {
-      currentPage--;
-      requestUpdate();
-    }
-  });
+  buttonNavigator.onPreviousPress([this] { previousPageOrTab(); });
+  buttonNavigator.onPreviousContinuous([this] { previousPage(); });
 }
 
 // Draws the current page: a styled Page when the HTML layout succeeded,
@@ -593,8 +610,9 @@ void DictionaryDefinitionActivity::render(RenderLock&&) {
     drawBody(fontId, bodyX, bodyStartY);
   }
 
-  const auto labels = mappedInput.mapLabels(tr(STR_BACK), tabs.size() > 1 ? tr(STR_DICTIONARY) : "",
-                                            (currentPage > 0 ? "<" : ""), (currentPage + 1 < totalPages ? ">" : ""));
+  const auto labels = mappedInput.mapLabels(
+      tr(STR_BACK), tabs.size() > 1 ? tr(STR_DICTIONARY) : "", (currentPage > 0 || activeTab > 0 ? "<" : ""),
+      (currentPage + 1 < totalPages || activeTab + 1 < static_cast<int>(tabs.size()) ? ">" : ""));
   GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
 
   if (busy) {
