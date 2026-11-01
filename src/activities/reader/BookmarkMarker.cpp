@@ -4,8 +4,8 @@
 
 namespace {
 
-constexpr int CORNER_SIZE = 44;  // length of each leg, in logical pixels
-constexpr int TAP_SIZE = 80;     // side of the square tap target in the corner
+constexpr int CORNER_SIZE = 88;  // length of each leg, in logical pixels
+constexpr int TAP_SIZE = 96;     // side of the square tap target in the corner
 
 }  // namespace
 
