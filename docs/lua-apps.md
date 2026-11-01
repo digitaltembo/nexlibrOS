@@ -218,8 +218,9 @@ message and do the lookup from `on_tick` so it is drawn first (see
 ## Limits
 
 - Lua heap is capped at 96KB per app (144KB in the 64-bit simulator, where
-  Lua objects are larger), and allocations fail early if the device would
-  drop below 40KB free; running out raises a "not enough memory" error.
+  Lua objects are larger). Boards with PSRAM keep the Lua heap in PSRAM. On
+  other boards, allocations also fail early if the device would drop below 40KB
+  of free internal RAM. Running out raises a "not enough memory" error.
   Compiled code counts against the cap, and is several times the size of its
   source.
 - Numbers are 32-bit (`LUA_32BITS`): integers wrap at ±2^31 and floats are

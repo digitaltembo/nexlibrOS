@@ -574,12 +574,17 @@ void* LuaRuntime::alloc(void* ud, void* ptr, const size_t osize, const size_t ns
   if (nsize > oldSize) {
     const size_t growth = nsize - oldSize;
     if (self->used + growth > HEAP_CAP) return nullptr;
-    // Internal RAM only: with PSRAM, malloc still places blocks under
-    // SPIRAM_MALLOC_ALWAYSINTERNAL (nearly all Lua objects) in internal RAM,
-    // and the default free size would count the PSRAM too.
+#ifndef BOARD_HAS_PSRAM
     if (heap_caps_get_free_size(MALLOC_CAP_INTERNAL) < MIN_FREE_HEAP + growth) return nullptr;
+#endif
   }
+#ifdef BOARD_HAS_PSRAM
+  // Most Lua objects are under SPIRAM_MALLOC_ALWAYSINTERNAL, so plain realloc
+  // would spend internal RAM that the firmware needs.
+  void* block = heap_caps_realloc(ptr, nsize, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+#else
   void* block = realloc(ptr, nsize);
+#endif
   if (!block) return nullptr;
   self->used = self->used - oldSize + nsize;
   return block;

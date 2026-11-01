@@ -2,6 +2,7 @@
 
 #include <Arduino.h>
 #include <Bitmap.h>
+#include <FontCacheManager.h>
 #include <GfxRenderer.h>
 #include <HalPowerManager.h>
 #include <HalStorage.h>
@@ -225,18 +226,40 @@ struct LuaAppBindings {
   static EpdFontFamily::Style style(const LuaAppActivity& app) {
     return static_cast<EpdFontFamily::Style>(app.fontStyle);
   }
+  // Loads an SD font's glyphs for str in one batch. Otherwise each one missing
+  // is a separate card read, and an 8-entry ring keeps few of them. Boards
+  // without PSRAM skip this: the glyphs would stay in internal RAM, which Lua
+  // needs there.
+  static void prewarmText([[maybe_unused]] const LuaAppActivity& app, [[maybe_unused]] const char* str) {
+#ifdef BOARD_HAS_PSRAM
+    auto* fontCache = app.renderer.getFontCacheManager();
+    if (!fontCache || !app.renderer.isSdCardFont(app.fontId)) return;
+    const auto styleMask = static_cast<uint8_t>(1U << app.fontStyle);
+    // draw() already holds RenderLock. Elsewhere, a prewarm frees and rebuilds
+    // font memory, so it needs the lock; if busy, glyphs load on demand instead.
+    if (app.inDraw) {
+      fontCache->prewarmCache(app.fontId, str, styleMask);
+      return;
+    }
+    RenderLock lock(RenderLock::Mode::Try);
+    if (lock.ownsLock()) fontCache->prewarmCache(app.fontId, str, styleMask);
+#endif
+  }
   // text(x, y, str [, black]): y is the top of the line box.
   static int text(lua_State* L) {
     auto& app = drawing(L);
     const int x = checkInt(L, 1);
     const int y = checkInt(L, 2);
     const char* str = luaL_checkstring(L, 3);
-    app.renderer.drawText(app.fontId, x, y, str, optBlack(L, 4), style(app));
+    const bool black = optBlack(L, 4);
+    prewarmText(app, str);
+    app.renderer.drawText(app.fontId, x, y, str, black, style(app));
     return 0;
   }
   static int textWidth(lua_State* L) {
     auto& app = self(L);
     const char* str = luaL_checkstring(L, 1);
+    prewarmText(app, str);
     lua_pushinteger(L, app.renderer.getTextWidth(app.fontId, str, style(app)));
     return 1;
   }
@@ -257,6 +280,7 @@ struct LuaAppBindings {
     const size_t capacity = len + static_cast<size_t>(maxLines) * 4 + 1;
     auto* buf = static_cast<char*>(lua_newuserdatauv(L, capacity, 0));
     int count = 0;
+    prewarmText(app, str);
     {
       const auto lines = app.renderer.wrappedText(app.fontId, str, maxWidth, maxLines, style(app));
       size_t used = 0;
